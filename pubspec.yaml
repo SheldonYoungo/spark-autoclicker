@@ -1,0 +1,26 @@
+name: spark_autoclicker
+description: Professional Autoclicker for Walmart Spark App.
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  firebase_core: ^2.15.0
+  firebase_auth: ^4.7.0
+  firebase_database: ^10.2.0
+  flutter_dotenv: ^5.1.0
+  decimal: ^2.3.3 # Zero Floats rule
+  provider: ^6.0.5
+  google_fonts: ^5.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
