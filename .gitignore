@@ -45,13 +45,34 @@ app.*.map.json
 /android/app/release
 
 # Flutter
-**/.dart_tool/
-**/.gemini/
-**/.android/
-**/.DS_Store
 build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.metadata
 
-android/
-docs/
+# Windows related
+windows/flutter/ephemeral/
+windows/flutter/generated_config.cmake
 
+# Web related
+web/
+
+# Sensitive files
 .env
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+
+# Log files
+*.log
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+
+# Visual Studio Code
+.vscode/
+
+windows/
+docs/

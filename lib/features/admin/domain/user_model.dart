@@ -1,4 +1,4 @@
-import 'package:shopspring_decimal/shopspring_decimal.dart';
+import 'package:decimal/decimal.dart';
 
 enum UserRole { admin, driver }
 
@@ -29,18 +29,22 @@ class DeviceInfo {
 }
 
 class UserModel {
-  final String phone;
+  final String id; // El ID único o teléfono
+  final String name;
   final UserRole role;
   final UserStatus status;
   final DateTime expirationDate;
-  final List<DeviceInfo> devices;
+  final List<String> authorizedDeviceIds; // Slots de hardware
+  final String? activationKey; // La llave que genera el admin
 
   UserModel({
-    required this.phone,
+    required this.id,
+    required this.name,
     required this.role,
     required this.status,
     required this.expirationDate,
-    this.devices = const [],
+    required this.authorizedDeviceIds,
+    this.activationKey,
   });
 
   bool get isActive => status == UserStatus.active && DateTime.now().isBefore(expirationDate);
@@ -48,22 +52,24 @@ class UserModel {
   bool get isAdmin => role == UserRole.admin;
 
   Map<String, dynamic> toJson() => {
-        'phone': phone,
+        'id': id,
+        'name': name,
         'role': role.name,
         'status': status.name,
         'expirationDate': expirationDate.toIso8601String(),
-        'devices': devices.map((d) => d.toJson()).toList(),
+        'authorizedDeviceIds': authorizedDeviceIds,
+        'activationKey': activationKey,
       };
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
     return UserModel(
-      phone: json['phone'],
+      id: json['id'],
+      name: json['name'] ?? '',
       role: UserRole.values.byName(json['role']),
       status: UserStatus.values.byName(json['status']),
       expirationDate: DateTime.parse(json['expirationDate']),
-      devices: (json['devices'] as List? ?? [])
-          .map((d) => DeviceInfo.fromJson(Map<String, dynamic>.from(d)))
-          .toList(),
+      authorizedDeviceIds: List<String>.from(json['authorizedDeviceIds'] ?? []),
+      activationKey: json['activationKey'],
     );
   }
 }
