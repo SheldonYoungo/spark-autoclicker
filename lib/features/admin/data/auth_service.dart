@@ -1,12 +1,13 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../domain/user_model.dart';
+import 'admin_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseDatabase _db = FirebaseDatabase.instance;
+  final AdminService _adminService = AdminService();
 
-  // Paso 1: Enviar el código SMS
   Future<void> verifyPhone({
     required String phoneNumber,
     required Function(String) onCodeSent,
@@ -15,10 +16,9 @@ class AuthService {
     await _auth.verifyPhoneNumber(
       phoneNumber: phoneNumber,
       verificationCompleted: (PhoneAuthCredential credential) async {
-        // En algunos Android, el SMS se lee solo y se loguea automáticamente
         await _auth.signInWithCredential(credential);
       },
-      verificationFailed: onError,
+      verificationFailed: (e) => onError(e),
       codeSent: (String verificationId, int? resendToken) {
         onCodeSent(verificationId);
       },
@@ -26,39 +26,89 @@ class AuthService {
     );
   }
 
-  // Paso 2: Validar el código que puso el usuario y ver si está en tu lista VIP
-  Future<UserModel?> signInWithCode({
+  /// Proceso de Login por SMS para Administrador y Chofer.
+  Future<UserModel?> signInWithSms({
     required String verificationId,
     required String smsCode,
+    bool isAdminRequest = false,
   }) async {
     try {
-      // 1. Loguear en Firebase Auth
-      final PhoneAuthCredential credential = PhoneAuthProvider.credential(
+      final AuthCredential credential = PhoneAuthProvider.credential(
         verificationId: verificationId,
         smsCode: smsCode,
       );
+      
       final userCredential = await _auth.signInWithCredential(credential);
-      final phone = userCredential.user?.phoneNumber;
+      final user = userCredential.user;
+      if (user == null) return null;
 
-      if (phone == null) return null;
+      // 1. Manejo de Bootstrap de Administrador
+      if (isAdminRequest) {
+        final alreadyHasAdmin = await _adminService.hasAdmin();
+        if (!alreadyHasAdmin) {
+          // Es el primer arranque: Creamos al dueño antes de que las reglas se cierren
+          await _adminService.promoteToAdmin(
+            uid: user.uid,
+            phone: user.phoneNumber ?? '',
+            name: 'Administrador Principal',
+          );
+        }
+      }
 
-      // 2. Buscar al usuario en tu base de datos (Realtime Database)
-      final snapshot = await _db.ref('users/$phone').get();
+      // 2. Obtener datos del usuario (Sea admin o chofer vinculado)
+      final snapshot = await _db.ref('users/${user.uid}').get();
 
       if (snapshot.exists) {
         return UserModel.fromJson(Map<String, dynamic>.from(snapshot.value as Map));
       } else {
-        // El número no está registrado por Sheldon
+        // Si no existe por UID, buscamos si Sheldon lo registró por teléfono (Chofer nuevo)
+        final phoneId = (user.phoneNumber ?? '').replaceAll('+', '').replaceAll('.', '_');
+        final phoneSnapshot = await _db.ref('users/$phoneId').get();
+
+        if (phoneSnapshot.exists) {
+          // VINCULACIÓN: El chofer entra por primera vez, movemos su perfil de Teléfono -> UID
+          final data = Map<String, dynamic>.from(phoneSnapshot.value as Map);
+          await _db.ref('users/${user.uid}').set(data);
+          await _db.ref('users/$phoneId').remove();
+          return UserModel.fromJson(data);
+        }
+
         await _auth.signOut();
-        throw Exception("Número no autorizado por el administrador.");
+        throw Exception("Este número no está autorizado. Contacta al administrador.");
       }
     } catch (e) {
       rethrow;
     }
   }
 
-  // Cerrar sesión
   Future<void> signOut() async {
     await _auth.signOut();
+  }
+
+  // Mantenemos este para compatibilidad con el flujo de llaves actual si es necesario
+  Future<UserModel?> validateActivationKey(String key, String deviceId) async {
+    try {
+      final snapshot = await _db.ref('users').get();
+      if (!snapshot.exists) return null;
+
+      final usersMap = snapshot.value as Map<dynamic, dynamic>;
+      for (var entry in usersMap.entries) {
+        final userData = Map<String, dynamic>.from(entry.value as Map);
+        if (userData['activationKey'] == key) {
+          final user = UserModel.fromJson(userData);
+          if (user.authorizedDeviceIds.contains(deviceId)) {
+            return user;
+          } else if (user.authorizedDeviceIds.isEmpty) {
+            await _db.ref('users/${user.id}/authorizedDeviceIds').set([deviceId]);
+            return user;
+          } else {
+            throw Exception("Dispositivo no autorizado.");
+          }
+        }
+      }
+      return null;
+    } catch (e) {
+      rethrow;
+    }
   }
 }

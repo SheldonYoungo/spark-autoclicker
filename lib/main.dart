@@ -14,7 +14,15 @@ void main() async {
 
   // Inicializamos Firebase
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: FirebaseOptions(
+        apiKey: dotenv.get('FIREBASE_API_KEY'),
+        appId: '1:1071477543888:android:55e638848d82137060965c', // ID del App (Android)
+        messagingSenderId: '1071477543888',
+        projectId: dotenv.get('FIREBASE_PROJECT_ID'),
+        databaseURL: dotenv.get('FIREBASE_DATABASE_URL'),
+      ),
+    );
   } catch (e) {
     // Si falla es porque probablemente falta el archivo google-services.json
     print("Error al inicializar Firebase: $e");
@@ -23,12 +31,15 @@ void main() async {
   runApp(const SparkApp());
 }
 
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 class SparkApp extends StatelessWidget {
   const SparkApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: 'Spark Autoclicker',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,

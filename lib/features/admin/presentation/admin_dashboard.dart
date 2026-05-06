@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_theme.dart';
 import '../domain/user_model.dart';
-import '../../../main.dart'; // Para cerrar sesión volviendo al Login
+import '../data/admin_service.dart';
+import '../../../core/network/firebase_diagnostics.dart';
 
 class AdminDashboard extends StatefulWidget {
+// ... (omitting middle parts for clarity in the tool, but I must provide the exact replacement)
   const AdminDashboard({super.key});
 
   @override
@@ -12,27 +14,52 @@ class AdminDashboard extends StatefulWidget {
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
-  // Datos dummy para visualizar el diseño (luego vendrán de Firebase)
-  final List<UserModel> _users = [
-    UserModel(
-      id: '1',
-      name: 'Valentina Paredes',
-      role: UserRole.driver,
-      status: UserStatus.active,
-      expirationDate: DateTime.now().add(const Duration(days: 30)),
-      authorizedDeviceIds: ['HUA-9923-X'],
-      activationKey: '1234',
-    ),
-    UserModel(
-      id: '2',
-      name: 'Pedro Chofer',
-      role: UserRole.driver,
-      status: UserStatus.inactive,
-      expirationDate: DateTime.now().subtract(const Duration(days: 1)),
-      authorizedDeviceIds: ['SAM-1102-Y'],
-      activationKey: '5678',
-    ),
-  ];
+  final AdminService _adminService = AdminService();
+
+  void _showAddDriverDialog() {
+    final nameController = TextEditingController();
+    final phoneController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.background,
+        title: Text('Nuevo Conductor', style: GoogleFonts.inter(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(labelText: 'Nombre Completo', labelStyle: TextStyle(color: Colors.white70)),
+            ),
+            TextField(
+              controller: phoneController,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(labelText: 'Teléfono (con +)', labelStyle: TextStyle(color: Colors.white70)),
+              keyboardType: TextInputType.phone,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primarySpark),
+            onPressed: () async {
+              if (nameController.text.isNotEmpty && phoneController.text.isNotEmpty) {
+                await _adminService.addDriver(
+                  phone: phoneController.text,
+                  name: nameController.text,
+                );
+                if (mounted) Navigator.pop(context);
+              }
+            },
+            child: const Text('Registrar', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -43,66 +70,90 @@ class _AdminDashboardState extends State<AdminDashboard> {
         elevation: 0,
         title: Text(
           'PANEL DE CONTROL',
-          style: GoogleFonts.inter(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: AppColors.white,
-          ),
+          style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.white),
         ),
         actions: [
           IconButton(
-            onPressed: () {
-              Navigator.of(context).pushReplacementNamed('/');
+            onPressed: () async {
+              final report = await FirebaseDiagnostics.checkHealth();
+              if (mounted) {
+                showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    backgroundColor: AppColors.background,
+                    title: const Text('Diagnóstico Firebase', style: TextStyle(color: Colors.white)),
+                    content: Text(
+                      'Auth: ${report['auth_status']}\n'
+                      'Lectura: ${report['database_read']}\n'
+                      'Escritura: ${report['database_write']}\n'
+                      'Error: ${report['error'] ?? 'Ninguno'}',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar')),
+                    ],
+                  ),
+                );
+              }
             },
+            icon: const Icon(Icons.health_and_safety, color: AppColors.secondaryCian),
+          ),
+          IconButton(
+            onPressed: () => Navigator.of(context).pushReplacementNamed('/'),
             icon: const Icon(Icons.logout, color: AppColors.primarySpark),
           ),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Hola, Sheldon',
-                  style: GoogleFonts.inter(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primarySpark,
-                  ),
+      body: StreamBuilder<List<UserModel>>(
+        stream: _adminService.getUsersStream(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator(color: AppColors.primarySpark));
+          }
+
+          if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.red)));
+          }
+
+          final users = snapshot.data?.where((u) => u.role == UserRole.driver).toList() ?? [];
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Hola, Sheldon',
+                      style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.primarySpark),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Tienes ${users.length} conductores registrados',
+                      style: GoogleFonts.inter(fontSize: 14, color: AppColors.secondaryCian),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Tienes ${_users.length} conductores registrados',
-                  style: GoogleFonts.inter(
-                    fontSize: 14,
-                    color: AppColors.secondaryCian,
-                  ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  itemCount: users.length,
+                  itemBuilder: (context, index) {
+                    return _buildUserCard(users[index]);
+                  },
                 ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              itemCount: _users.length,
-              itemBuilder: (context, index) {
-                final user = _users[index];
-                return _buildUserCard(user);
-              },
-            ),
-          ),
-        ],
+              ),
+            ],
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: AppColors.primarySpark,
+        onPressed: _showAddDriverDialog,
         child: const Icon(Icons.add, color: Colors.black),
-        onPressed: () {
-          // TODO: Abrir modal de nuevo usuario
-        },
       ),
     );
   }
@@ -116,9 +167,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.05),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isActive ? AppColors.borderBlue : Colors.white10,
-        ),
+        border: Border.all(color: isActive ? AppColors.borderBlue : Colors.white10),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -131,18 +180,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 children: [
                   Text(
                     user.name,
-                    style: GoogleFonts.inter(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.white,
-                    ),
+                    style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.white),
                   ),
                   Text(
-                    'Llave: ${user.activationKey ?? "---"}',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: AppColors.textDisabled,
-                    ),
+                    'Llave: ${user.activationKey ?? "---"} | ID: ${user.id}',
+                    style: GoogleFonts.inter(fontSize: 12, color: AppColors.textDisabled),
                   ),
                 ],
               ),
@@ -150,7 +192,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 value: isActive,
                 activeColor: AppColors.primarySpark,
                 onChanged: (value) {
-                  // TODO: Actualizar estado en Firebase
+                  _adminService.updateUserStatus(
+                    user.id,
+                    value ? UserStatus.active : UserStatus.inactive,
+                  );
                 },
               ),
             ],
@@ -158,15 +203,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
           const Divider(color: Colors.white10, height: 24),
           Row(
             children: [
-              Icon(Icons.phone_android, size: 14, color: AppColors.secondaryCian),
+              const Icon(Icons.phone_android, size: 14, color: AppColors.secondaryCian),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'IDs: ${user.authorizedDeviceIds.join(", ")}',
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    color: AppColors.white.withOpacity(0.7),
-                  ),
+                  user.authorizedDeviceIds.isEmpty 
+                    ? 'Esperando vinculación...' 
+                    : 'IDs: ${user.authorizedDeviceIds.join(", ")}',
+                  style: GoogleFonts.inter(fontSize: 11, color: AppColors.white.withOpacity(0.7)),
                 ),
               ),
               Container(
@@ -178,8 +222,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 child: Text(
                   isActive ? 'ACTIVO' : 'INACTIVO',
                   style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 10, 
+                    fontWeight: FontWeight.bold, 
                     color: isActive ? Colors.green : Colors.red,
                   ),
                 ),
