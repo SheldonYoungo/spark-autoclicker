@@ -76,3 +76,5 @@ ios/Runner/GoogleService-Info.plist
 
 windows/
 docs/
+
+.agents/

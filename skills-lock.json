@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "dart-flutter-patterns": {
+      "source": "affaan-m/everything-claude-code",
+      "sourceType": "github",
+      "skillPath": "skills/dart-flutter-patterns/SKILL.md",
+      "computedHash": "340e81b5936211afafd1eb9740b650956813712400c0548ba9d6b442b286e8c9"
+    }
+  }
+}

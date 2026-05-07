@@ -21,7 +21,7 @@ class FirebaseDiagnostics {
 
       // 2. Probar lectura de una ruta estática (Sin variables, sin tokens raros)
       // Usamos 'health_check' que es una palabra simple sin caracteres especiales.
-      final readTest = await _db.ref('health_check').get();
+      await _db.ref('health_check').get();
       report['database_read'] = 'Success';
 
       // 3. Probar escritura en una ruta estática

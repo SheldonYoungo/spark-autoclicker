@@ -16,7 +16,7 @@ class AppTheme {
       scaffoldBackgroundColor: AppColors.background,
       colorScheme: ColorScheme.fromSeed(
         seedColor: AppColors.primarySpark,
-        background: AppColors.background,
+        surface: AppColors.background,
         primary: AppColors.primarySpark,
         secondary: AppColors.secondaryCian,
       ),
