@@ -75,7 +75,8 @@ class BotMainScreen extends StatelessWidget {
                               color: AppColors.primarySpark,
                             ),
                           ),
-                          const Icon(Icons.bolt, color: AppColors.primarySpark, size: 24),
+                          const Icon(Icons.bolt,
+                              color: AppColors.primarySpark, size: 24),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -137,7 +138,7 @@ class BotMainScreen extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.05),
+                    color: Colors.white.withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: Colors.white12),
                   ),
@@ -146,10 +147,11 @@ class BotMainScreen extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.primarySpark.withOpacity(0.1),
+                          color: AppColors.primarySpark.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: const Icon(Icons.speed, color: AppColors.primarySpark),
+                        child: const Icon(Icons.speed,
+                            color: AppColors.primarySpark),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
@@ -213,7 +215,7 @@ class BotMainScreen extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
+        color: Colors.white.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white10),
       ),

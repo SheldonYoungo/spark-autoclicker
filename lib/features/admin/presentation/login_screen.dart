@@ -1,17 +1,11 @@
 import 'dart:async';
-import 'dart:io';
-import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:device_info_plus/device_info_plus.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../main.dart'; // Para el navigatorKey
-
-import 'admin_dashboard.dart';
-import '../../automation/presentation/bot_main_screen.dart';
+import '../../../main.dart';
 import '../data/auth_service.dart';
+import '../../automation/data/activation_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -21,12 +15,14 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final List<TextEditingController> _controllers = List.generate(4, (_) => TextEditingController());
-  final List<FocusNode> _focusNodes = List.generate(4, (_) => FocusNode());
   final AuthService _authService = AuthService();
+  final ActivationService _activationService = ActivationService();
+  final List<TextEditingController> _pinControllers = List.generate(4, (_) => TextEditingController());
+  final List<FocusNode> _pinFocusNodes = List.generate(4, (_) => FocusNode());
   
   String _deviceId = 'Obteniendo ID...';
   bool _isLoading = false;
+  String? _errorMessage;
   int _resendTimer = 0;
   Timer? _timer;
 
@@ -39,13 +35,23 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _timer?.cancel();
-    for (var controller in _controllers) {
-      controller.dispose();
+    for (var c in _pinControllers) {
+      c.dispose();
     }
-    for (var node in _focusNodes) {
-      node.dispose();
+    for (var f in _pinFocusNodes) {
+      f.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _getDeviceId() async {
+    String? deviceId;
+    try {
+      deviceId = await _activationService.getDeviceId();
+    } catch (e) {
+      deviceId = 'Error al obtener ID';
+    }
+    if (mounted) setState(() => _deviceId = deviceId ?? 'Desconocido');
   }
 
   void _startTimer() {
@@ -64,105 +70,57 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
-  Future<void> _getDeviceId() async {
-    String? deviceId;
-    final deviceInfo = DeviceInfoPlugin();
-    try {
-      if (Platform.isAndroid) {
-        final androidInfo = await deviceInfo.androidInfo;
-        deviceId = androidInfo.id;
-      } else if (Platform.isIOS) {
-        deviceId = (await deviceInfo.iosInfo).identifierForVendor;
-      }
-    } catch (e) {
-      deviceId = 'Error al obtener ID';
-    }
-    if (mounted) setState(() => _deviceId = deviceId ?? 'Desconocido');
-  }
-
-  void _onChanged(String value, int index) {
-    if (value.length == 1 && index < 3) {
-      _focusNodes[index + 1].requestFocus();
-    }
-    if (value.isEmpty && index > 0) {
-      _focusNodes[index - 1].requestFocus();
-    }
-    if (value.length == 1 && index == 3) {
-      _handleActivation();
-    }
-  }
-
-  // --- GESTIÓN SEGURA DE NAVEGACIÓN ---
-  
-  void _safePop() {
-    final nav = navigatorKey.currentState;
-    if (nav != null && nav.canPop()) nav.pop();
-  }
-
-  void _safePush(Widget page) {
-    navigatorKey.currentState?.pushReplacement(MaterialPageRoute(builder: (_) => page));
-  }
-
-  // -------------------------------------
-
+  // --- LÓGICA DE ACTIVACIÓN DIRECTA (PARA CHOFERES) ---
   Future<void> _handleActivation() async {
-    String code = _controllers.map((e) => e.text).join();
-    if (code.length < 4) return;
+    final String key = _pinControllers.map((c) => c.text).join();
+    if (key.length < 4) return;
 
-    setState(() => _isLoading = true);
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
-    try {
-      if (code == '9999') {
-        final currentUser = FirebaseAuth.instance.currentUser;
-        if (currentUser != null) {
-          final adminData = await FirebaseDatabase.instance.ref('users/${currentUser.uid}').get();
-          if (adminData.exists && adminData.child('role').value == 'admin') {
-            _safePush(const AdminDashboard());
-          } else {
-            await FirebaseAuth.instance.signOut();
-            _showAdminSmsDialog();
-          }
-        } else {
-          _showAdminSmsDialog();
-        }
-        return;
+    final String? error = await _activationService.activateDeviceWithKeyOnly(key, _deviceId);
+
+    if (!mounted) return;
+
+    if (error == null) {
+      // El AuthWrapper en main.dart detectará el cambio
+    } else {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = error;
+      });
+      // Limpiar PIN
+      for (var c in _pinControllers) {
+        c.clear();
       }
-
-      final user = await _authService.validateActivationKey(code, _deviceId);
-      if (user != null) {
-        if (!user.isActive) throw Exception("Suscripción inactiva.");
-        _safePush(const BotMainScreen());
-      } else {
-        throw Exception("Llave no válida.");
-      }
-    } catch (e) {
-      _showError(e.toString());
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      _pinFocusNodes[0].requestFocus();
     }
   }
 
-  void _showAdminSmsDialog() {
+  // --- LÓGICA DE LOGIN SECRETO (PARA ADMIN) ---
+  void _showSecretAdminLogin() {
     final phoneController = TextEditingController();
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.background,
-        title: const Text('Acceso Administrador', style: TextStyle(color: Colors.white)),
+        title: Text('Modo Administrador', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Recibirás un SMS para validar tu identidad.', 
-              style: TextStyle(color: Colors.white70, fontSize: 12)),
-            const SizedBox(height: 16),
             TextField(
               controller: phoneController,
+              autofocus: true,
               style: const TextStyle(color: Colors.white),
               keyboardType: TextInputType.phone,
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9+]'))], // Solo números y +
-              decoration: const InputDecoration(
-                labelText: 'Teléfono (+...)',
-                labelStyle: TextStyle(color: Colors.white70),
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9+]'))],
+              decoration: InputDecoration(
+                labelText: 'Número de Teléfono',
+                labelStyle: GoogleFonts.inter(color: Colors.white70),
               ),
             ),
           ],
@@ -175,19 +133,19 @@ class _LoginScreenState extends State<LoginScreen> {
               final phone = phoneController.text;
               if (phone.isEmpty) return;
               
-              _safePop(); // Cerrar diálogo de teléfono
+              Navigator.pop(ctx); // Cierra diálogo de teléfono
               _startTimer();
               _showLoadingDialog('Enviando SMS...');
               
               await _authService.verifyPhone(
                 phoneNumber: phone,
                 onCodeSent: (verId) {
-                  _safePop(); // Quitar loading
-                  _showOtpDialog(verId, true);
+                  _popSafe(); // Quitar loading
+                  if (mounted) _showOtpDialog(verId);
                 },
                 onError: (e) {
-                  _safePop(); // Quitar loading
-                  _showError(e.message ?? 'Error de SMS');
+                  _popSafe(); // Quitar loading
+                  if (mounted) _showError(e.message ?? 'Error de SMS');
                 },
               );
             },
@@ -198,9 +156,56 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  void _showOtpDialog(String verId) {
+    final otpController = TextEditingController();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.background,
+        title: const Text('Verificar', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: otpController,
+          autofocus: true,
+          style: GoogleFonts.jetBrainsMono(color: Colors.white, fontSize: 24, letterSpacing: 8),
+          textAlign: TextAlign.center,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          decoration: const InputDecoration(hintText: '000000', hintStyle: TextStyle(color: Colors.white24)),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primarySpark),
+            onPressed: () async {
+              final code = otpController.text;
+              if (code.length < 6) return;
+              
+              Navigator.pop(ctx); // Cierra diálogo OTP
+              _showLoadingDialog('Verificando...');
+              
+              try {
+                await _authService.signInWithSms(
+                  verificationId: verId,
+                  smsCode: code,
+                  isAdminRequest: true,
+                );
+                _popSafe(); // Quitar loading
+              } catch (e) {
+                _popSafe(); // Quitar loading
+                if (mounted) _showError(e.toString());
+              }
+            },
+            child: const Text('Entrar', style: TextStyle(color: Colors.black)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showLoadingDialog(String message) {
     showDialog(
-      context: navigatorKey.currentContext!,
+      context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.background,
@@ -216,69 +221,8 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  void _showOtpDialog(String verId, bool isAdmin) {
-    final otpController = TextEditingController();
-    showDialog(
-      context: navigatorKey.currentContext!,
-      barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: AppColors.background,
-          title: const Text('Verificar Código', style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: otpController,
-                style: const TextStyle(color: Colors.white, fontSize: 24, letterSpacing: 8),
-                textAlign: TextAlign.center,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly], // BLOQUEO DE LETRAS/SÍMBOLOS
-                maxLength: 6,
-                decoration: const InputDecoration(hintText: '000000', hintStyle: TextStyle(color: Colors.white24)),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _resendTimer > 0 ? 'Espera $_resendTimer s para reintentar' : '¿No recibiste el código?',
-                style: const TextStyle(color: Colors.white54, fontSize: 10),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primarySpark),
-              onPressed: () async {
-                final code = otpController.text;
-                if (code.length < 6) return;
-                
-                _safePop(); // Cerrar OTP
-                _showLoadingDialog('Verificando...');
-
-                try {
-                  final user = await _authService.signInWithSms(
-                    verificationId: verId,
-                    smsCode: code,
-                    isAdminRequest: isAdmin,
-                  );
-                  if (user != null) {
-                    _safePop(); // Quitar loading
-                    _safePush(const AdminDashboard());
-                  }
-                } catch (e) {
-                  _safePop(); // Quitar loading
-                  _showError(e.toString());
-                }
-              },
-              child: const Text('Verificar', style: TextStyle(color: Colors.black)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   void _showError(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message.replaceAll("Exception: ", "")), backgroundColor: Colors.red),
     );
@@ -286,83 +230,180 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _copyDeviceId() {
     Clipboard.setData(ClipboardData(text: _deviceId));
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('ID de dispositivo copiado')));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('ID copiado al portapapeles')));
+    }
+  }
+
+  void _popSafe() {
+    final nav = navigatorKey.currentState;
+    if (nav != null && nav.canPop()) {
+      nav.pop();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.background,
       body: Container(
-        width: double.infinity,
-        height: double.infinity,
         decoration: const BoxDecoration(
           gradient: RadialGradient(
             center: Alignment(-0.6, -1.0),
-            radius: 2.0,
-            colors: [Color(0xFF00D9F7), Color(0xFF00B4E4), Color(0xFF008ED1), Color(0xFF0069BD), Color(0xFF0043AA), Color(0xFF013688), Color(0xFF012966), Color(0xFF021B43), AppColors.background],
-            stops: [0.0, 0.12, 0.24, 0.36, 0.49, 0.61, 0.74, 0.87, 1.0],
+            radius: 2.2,
+            colors: [
+              Color(0xFF00D9F7), 
+              Color(0xFF00B4E4), 
+              Color(0xFF008ED1), 
+              Color(0xFF0069BD), 
+              Color(0xFF0043AA), 
+              Color(0xFF013688), 
+              Color(0xFF012966), 
+              Color(0xFF021B43), 
+              AppColors.background
+            ],
+            stops: [0.0, 0.1, 0.2, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0],
           ),
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+            padding: const EdgeInsets.symmetric(horizontal: 32.0),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Spacer(flex: 2),
-                Text('Ingresa tu Llave de Activación', textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 18, color: AppColors.white, height: 1.3)),
-                const SizedBox(height: 56),
+                
+                // Logo Discreto con Gesto Secreto
+                GestureDetector(
+                  onLongPress: _showSecretAdminLogin,
+                  child: Text(
+                    'SPARK APP',
+                    style: GoogleFonts.montserrat(
+                      color: Colors.white,
+                      fontSize: 36,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 6,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'VINCULACIÓN DE HARDWARE',
+                  style: GoogleFonts.inter(
+                    color: AppColors.primarySpark,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 3,
+                  ),
+                ),
+                
+                const Spacer(flex: 3),
+
+                // Cuadro de Vinculación (PIN)
+                Text(
+                  'INGRESA TU LLAVE',
+                  style: GoogleFonts.inter(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const SizedBox(height: 24),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: List.generate(4, (index) {
                     return Container(
-                      width: 75, height: 80,
-                      decoration: BoxDecoration(border: Border.all(color: AppColors.white, width: 1), borderRadius: BorderRadius.circular(12)),
+                      width: 60,
+                      height: 70,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white24),
+                      ),
                       child: Center(
                         child: TextField(
-                          controller: _controllers[index],
-                          focusNode: _focusNodes[index],
+                          controller: _pinControllers[index],
+                          focusNode: _pinFocusNodes[index],
                           textAlign: TextAlign.center,
                           keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly], // BLOQUEO EN EL LOGIN
                           maxLength: 1,
-                          style: GoogleFonts.inter(fontSize: 24, color: AppColors.white, fontWeight: FontWeight.bold),
+                          style: GoogleFonts.jetBrainsMono(
+                            color: AppColors.primarySpark,
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                          ),
                           decoration: const InputDecoration(counterText: '', border: InputBorder.none),
-                          onChanged: (value) => _onChanged(value, index),
+                          onChanged: (value) {
+                            if (value.isNotEmpty && index < 3) {
+                              _pinFocusNodes[index + 1].requestFocus();
+                            } else if (value.isEmpty && index > 0) {
+                              _pinFocusNodes[index - 1].requestFocus();
+                            }
+                            
+                            final currentKey = _pinControllers.map((c) => c.text).join();
+                            if (currentKey.length == 4) {
+                              _handleActivation();
+                            }
+                          },
                         ),
                       ),
                     );
                   }),
                 ),
-                const SizedBox(height: 32),
+
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 24),
+                  Text(
+                    _errorMessage!,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ],
+
+                const Spacer(flex: 2),
+
+                // Device Info Card
                 GestureDetector(
                   onTap: _copyDeviceId,
                   child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.white10),
+                    ),
                     child: Column(
                       children: [
-                        Text('TU ID DE DISPOSITIVO:', style: TextStyle(color: AppColors.secondaryCian, fontSize: 10)),
-                        const SizedBox(height: 4),
-                        Text(_deviceId, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 4),
-                        const Text('(Toca para copiar)', style: TextStyle(color: Colors.white54, fontSize: 10)),
+                        Text(
+                          'ID DE HARDWARE:',
+                          style: GoogleFonts.inter(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _deviceId,
+                          style: GoogleFonts.jetBrainsMono(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '(Toca para copiar)',
+                          style: GoogleFonts.inter(color: Colors.white24, fontSize: 9),
+                        ),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 40),
+                
+                const Spacer(flex: 2),
+                
                 if (_isLoading)
                   const CircularProgressIndicator(color: AppColors.primarySpark)
                 else
-                  Row(
-                    children: [
-                      Expanded(child: TextButton(onPressed: () {}, child: Text('Ayuda', style: GoogleFonts.inter(fontSize: 18, color: AppColors.primarySpark)))),
-                      const SizedBox(width: 10),
-                      Expanded(child: ElevatedButton(onPressed: _handleActivation, style: ElevatedButton.styleFrom(backgroundColor: AppColors.primarySpark, foregroundColor: Colors.black, elevation: 0, padding: const EdgeInsets.symmetric(vertical: 18), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: Text('Activar', style: GoogleFonts.inter(fontSize: 18)))),
-                    ],
+                  Text(
+                    'Spark Engine v1.0.2',
+                    style: GoogleFonts.inter(color: Colors.white10, fontSize: 10),
                   ),
-                const Spacer(flex: 3),
+                  
+                const SizedBox(height: 24),
               ],
             ),
           ),

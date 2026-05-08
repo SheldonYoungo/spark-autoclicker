@@ -82,6 +82,7 @@ class AdminService {
     required String phone,
     required String name,
     int? customHours,
+    int maxSlots = 1,
   }) async {
     final int hours = customHours ?? await getDefaultHours();
     final tempId = phone.replaceAll('+', '').replaceAll('.', '_');
@@ -93,21 +94,44 @@ class AdminService {
       status: UserStatus.pending,
       expirationDate: DateTime.now().add(Duration(hours: hours)),
       authorizedDeviceIds: [],
+      maxSlots: maxSlots,
       activationKey: generateActivationKey(),
     );
 
     await _db.ref('users/$tempId').set(newUser.toJson());
   }
 
-  /// Renovar el servicio de un conductor: genera nueva llave y extiende tiempo desde ahora
-  Future<void> renewDriver(String uid, {int? customHours}) async {
+  /// Renovar el servicio de un conductor: genera nueva llave y extiende tiempo desde ahora.
+  /// También permite al admin decidir si limpia los Device IDs vinculados (Reset de Hardware).
+  Future<void> renewDriver(String uid, {int? customHours, bool resetHardware = false}) async {
     final int hours = customHours ?? await getDefaultHours();
     final String newKey = generateActivationKey();
     
-    await _db.ref('users/$uid').update({
+    final Map<String, dynamic> updates = {
       'expirationDate': DateTime.now().add(Duration(hours: hours)).toIso8601String(),
       'activationKey': newKey,
-      'status': UserStatus.pending.name, // Vuelve a pedir activación/vínculo si expiró
+      'status': UserStatus.pending.name,
+    };
+
+    if (resetHardware) {
+      updates['authorizedDeviceIds'] = [];
+    }
+    
+    await _db.ref('users/$uid').update(updates);
+  }
+
+  /// Resetear manualmente los dispositivos vinculados de un usuario
+  Future<void> resetHardware(String uid) async {
+    await _db.ref('users/$uid').update({
+      'authorizedDeviceIds': [],
+      'status': UserStatus.pending.name,
+    });
+  }
+
+  /// Actualizar la cantidad de slots permitidos para un usuario
+  Future<void> updateMaxSlots(String uid, int maxSlots) async {
+    await _db.ref('users/$uid').update({
+      'maxSlots': maxSlots,
     });
   }
 

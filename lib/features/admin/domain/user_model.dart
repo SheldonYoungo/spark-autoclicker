@@ -1,5 +1,3 @@
-import 'package:decimal/decimal.dart';
-
 enum UserRole { admin, driver }
 
 enum UserStatus { active, inactive, pending }
@@ -35,6 +33,7 @@ class UserModel {
   final UserStatus status;
   final DateTime expirationDate;
   final List<String> authorizedDeviceIds; // Slots de hardware
+  final int maxSlots; // Cantidad máxima de dispositivos permitidos
   final String? activationKey; // La llave que genera el admin
 
   UserModel({
@@ -44,12 +43,15 @@ class UserModel {
     required this.status,
     required this.expirationDate,
     required this.authorizedDeviceIds,
+    this.maxSlots = 1, // Por defecto 1 slot
     this.activationKey,
   });
 
   bool get isActive => status == UserStatus.active && DateTime.now().isBefore(expirationDate);
 
   bool get isAdmin => role == UserRole.admin;
+
+  bool get hasAvailableSlots => authorizedDeviceIds.length < maxSlots;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -58,6 +60,7 @@ class UserModel {
         'status': status.name,
         'expirationDate': expirationDate.toIso8601String(),
         'authorizedDeviceIds': authorizedDeviceIds,
+        'maxSlots': maxSlots,
         'activationKey': activationKey,
       };
 
@@ -69,6 +72,7 @@ class UserModel {
       status: UserStatus.values.byName(json['status']),
       expirationDate: DateTime.parse(json['expirationDate']),
       authorizedDeviceIds: List<String>.from(json['authorizedDeviceIds'] ?? []),
+      maxSlots: json['maxSlots'] ?? 1,
       activationKey: json['activationKey'],
     );
   }
