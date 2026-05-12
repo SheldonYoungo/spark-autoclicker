@@ -374,7 +374,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
+        color: Colors.white.
+        withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isExpired 

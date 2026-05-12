@@ -87,7 +87,9 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
 
     if (error == null) {
-      // El AuthWrapper en main.dart detectará el cambio
+      // ÉXITO: No navegamos manualmente. 
+      // El ValueNotifier en ActivationService notificará al AuthWrapper en main.dart
+      // y la pantalla cambiará automáticamente a BotMainScreen.
     } else {
       setState(() {
         _isLoading = false;

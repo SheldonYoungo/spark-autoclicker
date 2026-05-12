@@ -23,6 +23,8 @@ void main() async {
         databaseURL: dotenv.get('FIREBASE_DATABASE_URL'),
       ),
     );
+    // Cargar estado inicial de activación de hardware
+    await ActivationService().init();
   } catch (e) {
     debugPrint("Error al inicializar Firebase: $e");
   }
@@ -52,48 +54,61 @@ class AuthWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const LoadingScreen(message: 'Iniciando...');
-        }
-
-        final user = snapshot.data;
-        
-        // 1. Si hay un usuario logueado vía Firebase (ADMIN)
-        if (user != null) {
-          return FutureBuilder<bool>(
-            future: _isUserAdmin(user.uid),
-            builder: (context, adminSnapshot) {
-              if (adminSnapshot.connectionState == ConnectionState.waiting) {
-                return const LoadingScreen(message: 'Verificando privilegios...');
-              }
-              if (adminSnapshot.data == true) {
-                return const AdminDashboard();
-              }
-              // Si no es admin pero está logueado, lo tratamos como login fallido
-              return const LoginScreen();
-            },
-          );
-        }
-
-        // 2. Si no hay usuario logueado, verificamos si el dispositivo está vinculado (CONDUCTOR)
-        return FutureBuilder<bool>(
-          future: ActivationService().isCurrentDeviceAuthorized(),
-          builder: (context, deviceSnapshot) {
-            if (deviceSnapshot.connectionState == ConnectionState.waiting) {
-              return const LoadingScreen(message: 'Validando hardware...');
+    return ValueListenableBuilder<String?>(
+      valueListenable: ActivationService.linkedUidNotifier,
+      builder: (context, linkedUid, _) {
+        return StreamBuilder<User?>(
+          stream: FirebaseAuth.instance.authStateChanges(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const LoadingScreen(message: 'Iniciando...');
             }
 
-            // REDIRECCIÓN INTELIGENTE:
-            // Si el dispositivo está autorizado, entra al bot.
-            // Si NO está autorizado, muestra la pantalla de vinculación (azul).
-            if (deviceSnapshot.data == true) {
-              return const BotMainScreen();
-            } else {
-              return const LoginScreen();
+            final user = snapshot.data;
+            
+            // 1. Si hay un usuario logueado vía Firebase (ADMIN)
+            if (user != null) {
+              return FutureBuilder<bool>(
+                future: _isUserAdmin(user.uid),
+                builder: (context, adminSnapshot) {
+                  if (adminSnapshot.connectionState == ConnectionState.waiting) {
+                    return const LoadingScreen(message: 'Verificando privilegios...');
+                  }
+                  if (adminSnapshot.data == true) {
+                    return const AdminDashboard();
+                  }
+                  // Si no es admin pero está logueado, lo tratamos como login fallido
+                  return const LoginScreen();
+                },
+              );
             }
+
+            // 2. Si no hay usuario logueado, verificamos si el dispositivo está vinculado (CONDUCTOR)
+            // Si linkedUid ya tiene valor por el notificador, vamos directo al bot.
+            return FutureBuilder<bool>(
+              future: linkedUid != null 
+                  ? Future.value(true) 
+                  : ActivationService().isCurrentDeviceAuthorized(),
+              builder: (context, deviceSnapshot) {
+                if (deviceSnapshot.connectionState == ConnectionState.waiting) {
+                  return const LoadingScreen(message: 'Validando hardware...');
+                }
+
+                if (deviceSnapshot.hasError) {
+                  debugPrint("Error en AuthWrapper: ${deviceSnapshot.error}");
+                  return const LoginScreen();
+                }
+
+                debugPrint("Dispositivo autorizado: ${deviceSnapshot.data}");
+
+                // REDIRECCIÓN INTELIGENTE:
+                if (deviceSnapshot.data == true) {
+                  return const BotMainScreen();
+                } else {
+                  return const LoginScreen();
+                }
+              },
+            );
           },
         );
       },

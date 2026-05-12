@@ -86,6 +86,7 @@ class AdminService {
   }) async {
     final int hours = customHours ?? await getDefaultHours();
     final tempId = phone.replaceAll('+', '').replaceAll('.', '_');
+    final String key = generateActivationKey();
     
     final newUser = UserModel(
       id: tempId,
@@ -95,10 +96,13 @@ class AdminService {
       expirationDate: DateTime.now().add(Duration(hours: hours)),
       authorizedDeviceIds: [],
       maxSlots: maxSlots,
-      activationKey: generateActivationKey(),
+      activationKey: key,
     );
 
+    // Guardar usuario
     await _db.ref('users/$tempId').set(newUser.toJson());
+    // Registrar llave para búsqueda rápida
+    await _db.ref('activation_keys/$key').set({'uid': tempId});
   }
 
   /// Renovar el servicio de un conductor: genera nueva llave y extiende tiempo desde ahora.
@@ -107,6 +111,12 @@ class AdminService {
     final int hours = customHours ?? await getDefaultHours();
     final String newKey = generateActivationKey();
     
+    // 1. Limpiar llave anterior si existe en el nodo de búsqueda rápida
+    final oldKeySnapshot = await _db.ref('users/$uid/activationKey').get();
+    if (oldKeySnapshot.exists) {
+      await _db.ref('activation_keys/${oldKeySnapshot.value}').remove();
+    }
+
     final Map<String, dynamic> updates = {
       'expirationDate': DateTime.now().add(Duration(hours: hours)).toIso8601String(),
       'activationKey': newKey,
@@ -117,11 +127,15 @@ class AdminService {
       updates['authorizedDeviceIds'] = [];
     }
     
+    // 2. Actualizar usuario
     await _db.ref('users/$uid').update(updates);
+    // 3. Registrar nueva llave
+    await _db.ref('activation_keys/$newKey').set({'uid': uid});
   }
 
   /// Resetear manualmente los dispositivos vinculados de un usuario
   Future<void> resetHardware(String uid) async {
+    // Al resetear hardware, el status vuelve a pending para forzar re-activación
     await _db.ref('users/$uid').update({
       'authorizedDeviceIds': [],
       'status': UserStatus.pending.name,
@@ -137,6 +151,11 @@ class AdminService {
 
   /// Eliminar un usuario (conductor) de la base de datos
   Future<void> deleteUser(String uid) async {
+    // Limpiar llave en activation_keys antes de borrar al usuario
+    final keySnapshot = await _db.ref('users/$uid/activationKey').get();
+    if (keySnapshot.exists) {
+      await _db.ref('activation_keys/${keySnapshot.value}').remove();
+    }
     await _db.ref('users/$uid').remove();
   }
 }
