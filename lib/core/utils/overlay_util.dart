@@ -4,7 +4,6 @@ import 'dart:async';
 
 class OverlayUtil {
   /// Muestra el overlay en un cristal pequeño (150x150) para no bloquear el sistema.
-  /// Activa el arrastre nativo para que el usuario pueda moverlo por toda la pantalla.
   static Future<String?> showOverlay() async {
     try {
       bool status = await FlutterOverlayWindow.isPermissionGranted();
@@ -32,8 +31,9 @@ class OverlayUtil {
           height: 150,
         );
 
-        // SALIR DE LA APP: Minimiza automáticamente para navegar el sistema
-        await SystemChannels.platform.invokeMethod('SystemNavigator.pop');
+        // MINIMIZAR REAL: Envía la app al fondo sin destruirla para mantener el overlay vivo
+        const MethodChannel _channel = MethodChannel('com.spark.autoclicker/core');
+        await _channel.invokeMethod('moveToBackground');
 
         return null;
       } else {

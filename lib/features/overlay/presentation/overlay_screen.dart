@@ -11,39 +11,79 @@ class OverlayScreen extends StatefulWidget {
   State<OverlayScreen> createState() => _OverlayScreenState();
 }
 
-class _OverlayScreenState extends State<OverlayScreen> {
+class _OverlayScreenState extends State<OverlayScreen> with TickerProviderStateMixin {
   bool _isExpanded = false;
   bool _isBotActive = false;
+  
+  // Posición base del componente
+  Offset _position = const Offset(200, 300);
+  
+  // Animación para el efecto "Imán" (Magnetic Snap)
+  late AnimationController _snapController;
+  late Animation<Offset> _snapAnimation;
 
   @override
   void initState() {
     super.initState();
     _isExpanded = false;
+    _snapController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    _snapController.addListener(() {
+      setState(() {
+        _position = _snapAnimation.value;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _snapController.dispose();
+    super.dispose();
+  }
+
+  // Lógica de "Imán" que pega el componente al borde lateral más cercano
+  void _runSnapAnimation(double screenWidth, double elementWidth) {
+    final double centerX = _position.dx + (elementWidth / 2);
+    final double targetX = (centerX < screenWidth / 2) ? 0 : screenWidth - elementWidth;
+
+    _snapAnimation = _snapController.drive(
+      Tween<Offset>(
+        begin: _position,
+        end: Offset(targetX, _position.dy),
+      ),
+    );
+    
+    _snapController.reset();
+    _snapController.forward();
   }
 
   @override
   Widget build(BuildContext context) {
+    final Size screenSize = MediaQuery.of(context).size;
+
     return Material(
       color: Colors.transparent,
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 250),
-        child: _isExpanded ? _buildExpandedPanel() : _buildCollapsedIcon(),
+        child: _isExpanded 
+          ? _buildDraggablePanel(screenSize.width) 
+          : _buildFloatingBubble(screenSize.width),
       ),
     );
   }
 
-  // --- 1. ICONO FLOTANTE (ARRASTRABLE) ---
-  Widget _buildCollapsedIcon() {
-    return GestureDetector(
-      key: const ValueKey('collapsed'),
-      onTap: () async {
-        setState(() => _isExpanded = true);
-        
-        // EXPANDIR A TAMAÑO DE PANEL (320x500 dp)
-        // Mantenemos enableDrag: true para que el menú también se pueda mover.
-        await FlutterOverlayWindow.resizeOverlay(320, 500, true);
-      },
-      child: Center(
+  // --- 1. FLOATING BUBBLE (Messenger Style) ---
+  Widget _buildFloatingBubble(double screenWidth) {
+    return Center(
+      key: const ValueKey('bubble'),
+      child: GestureDetector(
+        onTap: () async {
+          setState(() => _isExpanded = true);
+          // Expandimos la ventana nativa al tamaño del menú
+          await FlutterOverlayWindow.resizeOverlay(320, 500, true);
+        },
         child: Container(
           width: 60,
           height: 60,
@@ -68,16 +108,16 @@ class _OverlayScreenState extends State<OverlayScreen> {
     );
   }
 
-  // --- 2. PANEL DE CONTROL (TARJETA ARRASTRABLE) ---
-  Widget _buildExpandedPanel() {
+  // --- 2. PANEL DE CONTROL (TARJETA ARRASTRABLE NATIVAMENTE) ---
+  Widget _buildDraggablePanel(double screenWidth) {
     return Center(
+      key: const ValueKey('panel'),
       child: Container(
-        key: const ValueKey('expanded'),
-        width: 300, // Un poco más pequeño que la ventana (320) para evitar cortes
+        width: 300, 
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           color: AppColors.background.withValues(alpha: 0.98),
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.circular(24),
           border: Border.all(color: AppColors.borderBlue, width: 2),
           boxShadow: const [
             BoxShadow(color: Colors.black87, blurRadius: 15, spreadRadius: 2),
@@ -86,7 +126,6 @@ class _OverlayScreenState extends State<OverlayScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Mango visual para arrastre
             Container(
               width: 40,
               height: 4,
@@ -102,10 +141,9 @@ class _OverlayScreenState extends State<OverlayScreen> {
                 IconButton(
                   icon: const Icon(Icons.remove, color: Colors.white54),
                   onPressed: () async {
-                    // MINIMIZAR: Volvemos al cristal pequeño de 150x150 dp
+                    setState(() => _isExpanded = false);
+                    // Regresamos al cristal pequeño (150x150)
                     await FlutterOverlayWindow.resizeOverlay(150, 150, true);
-                    await Future.delayed(const Duration(milliseconds: 50));
-                    if (mounted) setState(() => _isExpanded = false);
                   },
                 ),
               ],

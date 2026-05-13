@@ -6,6 +6,7 @@
 
     <application
         android:label="spark_autoclicker"
+
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         

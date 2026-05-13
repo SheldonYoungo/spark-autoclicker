@@ -22,6 +22,10 @@ class MainActivity : FlutterActivity() {
                     startActivity(intent)
                     result.success(true)
                 }
+                "moveToBackground" -> {
+                    moveTaskToBack(true)
+                    result.success(true)
+                }
                 "clickAt" -> {
                     val x = call.argument<Double>("x")?.toFloat() ?: 0f
                     val y = call.argument<Double>("y")?.toFloat() ?: 0f
