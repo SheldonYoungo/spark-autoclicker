@@ -2,8 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_theme.dart';
 
-class BotMainScreen extends StatelessWidget {
+import 'package:spark_autoclicker/core/utils/overlay_util.dart';
+
+class BotMainScreen extends StatefulWidget {
   const BotMainScreen({super.key});
+
+  @override
+  State<BotMainScreen> createState() => _BotMainScreenState();
+}
+
+class _BotMainScreenState extends State<BotMainScreen> {
+  @override
+  void initState() {
+    super.initState();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -185,7 +197,17 @@ class BotMainScreen extends StatelessWidget {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () {},
+                    onPressed: () async {
+                      final String? message = await OverlayUtil.showOverlay();
+                      if (message != null && mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(message),
+                            backgroundColor: message.contains('activo') ? Colors.blue : Colors.redAccent,
+                          ),
+                        );
+                      }
+                    },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primarySpark,
                       foregroundColor: Colors.black,

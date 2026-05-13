@@ -21,7 +21,32 @@ class SparkAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
-        // Aquí se procesarán los eventos de la app de Walmart
+        // Solo procesamos eventos de la app de Spark (Walmart)
+        // Nota: Asegúrate de que el paquete sea correcto. 
+        // Comúnmente es: com.walmart.android.delivery.driver
+        val packageName = event.packageName?.toString() ?: return
+        
+        if (packageName.contains("walmart", ignoreCase = true) || packageName.contains("spark", ignoreCase = true)) {
+            val rootNode = rootInActiveWindow ?: return
+            scanForOffers(rootNode)
+        }
+    }
+
+    private fun scanForOffers(node: AccessibilityNodeInfo) {
+        // Recorrido recursivo para encontrar datos de la oferta
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            
+            // Aquí buscaremos patrones como: "Accept", "$", "miles", etc.
+            val text = child.text?.toString()
+            if (text != null) {
+                // Logueamos para depuración (esto lo quitaremos en producción)
+                Log.d(TAG, "Nodo detectado: $text")
+            }
+            
+            scanForOffers(child)
+            child.recycle()
+        }
     }
 
     override fun onInterrupt() {

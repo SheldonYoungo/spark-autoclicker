@@ -134,7 +134,7 @@ class ActivationService {
       await _db.ref('users/$uid').update({
         'status': UserStatus.active.name,
         'authorizedDeviceIds': updatedDeviceIds,
-        'activationKey': null, 
+        // No ponemos activationKey a null para que el usuario pueda re-usarla si es necesario
       });
 
       // 6. Guardar localmente
@@ -142,8 +142,8 @@ class ActivationService {
       await prefs.setString(_keyLinkedUid, uid);
       linkedUidNotifier.value = uid; // Notificar a la UI del cambio de estado
 
-      // 7. Limpiar la llave (Opcional, si falla no bloqueamos al usuario)
-      _db.ref('activation_keys/$key').remove().catchError((_) => null);
+      // 7. Ya no borramos la llave del nodo público para permitir re-activación
+      // _db.ref('activation_keys/$key').remove().catchError((_) => null);
 
       return null;
     } catch (e) {
@@ -173,18 +173,53 @@ class ActivationService {
       final userData = Map<String, dynamic>.from(snapshot.value as Map);
       final user = UserModel.fromJson(userData);
       
-      return user.role == UserRole.driver && 
+      final isValid = user.role == UserRole.driver && 
              user.authorizedDeviceIds.contains(deviceId) && 
-             user.isActive;
+             user.isActive &&
+             !DateTime.now().isAfter(user.expirationDate);
+
+      if (!isValid) {
+        await clearLocalLink();
+      }
+      
+      return isValid;
     } catch (e) {
       debugPrint("Error validando hardware: $e");
       return false;
     }
   }
 
+  /// Escuchar cambios en tiempo real para el estado de autenticación del chofer
+  Stream<bool> authStateStream(String uid) async* {
+    final deviceId = await getDeviceId();
+    
+    yield* _db.ref('users/$uid').onValue.map((event) {
+      if (!event.snapshot.exists) return false;
+      
+      try {
+        final userData = Map<String, dynamic>.from(event.snapshot.value as Map);
+        final user = UserModel.fromJson(userData);
+        
+        final isValid = user.role == UserRole.driver && 
+               user.authorizedDeviceIds.contains(deviceId) && 
+               user.isActive &&
+               !DateTime.now().isAfter(user.expirationDate);
+
+        if (!isValid) {
+          clearLocalLink(); // Limpieza automática si se invalida
+        }
+        
+        return isValid;
+      } catch (e) {
+        return false;
+      }
+    });
+  }
+
   /// Cerrar sesión local (limpiar vinculación de hardware local)
   Future<void> clearLocalLink() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyLinkedUid);
+    linkedUidNotifier.value = null; // Notificar a la UI para expulsar al usuario
   }
 }

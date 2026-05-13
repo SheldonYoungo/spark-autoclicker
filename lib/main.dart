@@ -8,6 +8,7 @@ import 'package:spark_autoclicker/features/admin/presentation/login_screen.dart'
 import 'package:spark_autoclicker/features/admin/presentation/admin_dashboard.dart';
 import 'package:spark_autoclicker/features/automation/presentation/bot_main_screen.dart';
 import 'package:spark_autoclicker/features/automation/data/activation_service.dart';
+import 'package:spark_autoclicker/features/overlay/presentation/overlay_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +33,18 @@ void main() async {
   runApp(const SparkApp());
 }
 
+// Punto de entrada específico para el Overlay Flotante
+@pragma("vm:entry-point")
+void overlayMain() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(
+    const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: OverlayScreen(),
+    ),
+  );
+}
+
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 class SparkApp extends StatelessWidget {
@@ -49,9 +62,14 @@ class SparkApp extends StatelessWidget {
   }
 }
 
-class AuthWrapper extends StatelessWidget {
+class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
 
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<String?>(
@@ -77,38 +95,35 @@ class AuthWrapper extends StatelessWidget {
                   if (adminSnapshot.data == true) {
                     return const AdminDashboard();
                   }
-                  // Si no es admin pero está logueado, lo tratamos como login fallido
                   return const LoginScreen();
                 },
               );
             }
 
-            // 2. Si no hay usuario logueado, verificamos si el dispositivo está vinculado (CONDUCTOR)
-            // Si linkedUid ya tiene valor por el notificador, vamos directo al bot.
-            return FutureBuilder<bool>(
-              future: linkedUid != null 
-                  ? Future.value(true) 
-                  : ActivationService().isCurrentDeviceAuthorized(),
-              builder: (context, deviceSnapshot) {
-                if (deviceSnapshot.connectionState == ConnectionState.waiting) {
-                  return const LoadingScreen(message: 'Validando hardware...');
-                }
+            // 2. Si no hay admin, pero el dispositivo está vinculado (CONDUCTOR)
+            if (linkedUid != null) {
+              return StreamBuilder<bool>(
+                stream: ActivationService().authStateStream(linkedUid),
+                builder: (context, deviceSnapshot) {
+                  if (deviceSnapshot.connectionState == ConnectionState.waiting) {
+                    // Solo mostramos loading la primera vez o si no tenemos data previa
+                    if (!deviceSnapshot.hasData) {
+                      return const LoadingScreen(message: 'Validando suscripción...');
+                    }
+                  }
 
-                if (deviceSnapshot.hasError) {
-                  debugPrint("Error en AuthWrapper: ${deviceSnapshot.error}");
-                  return const LoginScreen();
-                }
+                  if (deviceSnapshot.data == true) {
+                    return const BotMainScreen();
+                  } else {
+                    // Si el stream emite false, el servicio ya llamó a clearLocalLink
+                    return const LoginScreen();
+                  }
+                },
+              );
+            }
 
-                debugPrint("Dispositivo autorizado: ${deviceSnapshot.data}");
-
-                // REDIRECCIÓN INTELIGENTE:
-                if (deviceSnapshot.data == true) {
-                  return const BotMainScreen();
-                } else {
-                  return const LoginScreen();
-                }
-              },
-            );
+            // 3. Estado por defecto: Login
+            return const LoginScreen();
           },
         );
       },
