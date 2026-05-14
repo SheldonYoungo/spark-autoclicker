@@ -1,9 +1,10 @@
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 
 class OverlayUtil {
-  /// Muestra el overlay en un cristal pequeño (150x150) para no bloquear el sistema.
+  /// Muestra el overlay usando PositionGravity.auto para el efecto imán nativo (Messenger style)
   static Future<String?> showOverlay() async {
     try {
       bool status = await FlutterOverlayWindow.isPermissionGranted();
@@ -14,24 +15,27 @@ class OverlayUtil {
 
       if (status) {
         if (await FlutterOverlayWindow.isActive()) {
+          debugPrint("Overlay ya activo, cerrando antes de reabrir...");
           await FlutterOverlayWindow.closeOverlay();
-          await Future.delayed(const Duration(milliseconds: 200));
+          // Aumentamos ligeramente el delay para asegurar la disposición del motor previo
+          await Future.delayed(const Duration(milliseconds: 600));
         }
 
-        // LANZAMIENTO INICIAL: Ventana pequeña e interactiva
+        debugPrint("Iniciando FlutterOverlayWindow.showOverlay...");
         await FlutterOverlayWindow.showOverlay(
-          enableDrag: true, // Arrastre nativo fluido
+          enableDrag: true, 
           overlayTitle: "INIBOT",
           overlayContent: "Bot de Spark Activo",
-          flag: OverlayFlag.defaultFlag, // Operable
+          flag: OverlayFlag.defaultFlag, 
           visibility: NotificationVisibility.visibilityPublic,
-          positionGravity: PositionGravity.none,
+          positionGravity: PositionGravity.auto,
           alignment: OverlayAlignment.centerRight,
-          width: 150, 
-          height: 150,
+          width: 120,
+          height: 120,
         );
 
-        // MINIMIZAR REAL: Envía la app al fondo sin destruirla para mantener el overlay vivo
+        debugPrint("Overlay mostrado exitosamente");
+
         const MethodChannel _channel = MethodChannel('com.spark.autoclicker/core');
         await _channel.invokeMethod('moveToBackground');
 

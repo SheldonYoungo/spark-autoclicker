@@ -11,88 +11,63 @@ class OverlayScreen extends StatefulWidget {
   State<OverlayScreen> createState() => _OverlayScreenState();
 }
 
-class _OverlayScreenState extends State<OverlayScreen> with TickerProviderStateMixin {
+class _OverlayScreenState extends State<OverlayScreen> {
   bool _isExpanded = false;
   bool _isBotActive = false;
-  
-  // Posición base del componente
-  Offset _position = const Offset(200, 300);
-  
-  // Animación para el efecto "Imán" (Magnetic Snap)
-  late AnimationController _snapController;
-  late Animation<Offset> _snapAnimation;
 
   @override
   void initState() {
     super.initState();
+    debugPrint("OverlayScreen: initState llamado");
     _isExpanded = false;
-    _snapController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 350),
-    );
-    _snapController.addListener(() {
-      setState(() {
-        _position = _snapAnimation.value;
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _snapController.dispose();
-    super.dispose();
-  }
-
-  // Lógica de "Imán" que pega el componente al borde lateral más cercano
-  void _runSnapAnimation(double screenWidth, double elementWidth) {
-    final double centerX = _position.dx + (elementWidth / 2);
-    final double targetX = (centerX < screenWidth / 2) ? 0 : screenWidth - elementWidth;
-
-    _snapAnimation = _snapController.drive(
-      Tween<Offset>(
-        begin: _position,
-        end: Offset(targetX, _position.dy),
-      ),
-    );
-    
-    _snapController.reset();
-    _snapController.forward();
   }
 
   @override
   Widget build(BuildContext context) {
-    final Size screenSize = MediaQuery.of(context).size;
+    debugPrint("OverlayScreen: build llamado (isExpanded: $_isExpanded)");
+
+    MediaQuery.of(context).size;
 
     return Material(
       color: Colors.transparent,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 250),
-        child: _isExpanded 
-          ? _buildDraggablePanel(screenSize.width) 
-          : _buildFloatingBubble(screenSize.width),
-      ),
+      child: SizedBox(
+        width: 120,
+        height: 120,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          child: _isExpanded
+              ? _buildDraggablePanel()
+              : _buildFloatingBubble(),
+        ),
+      )
+
     );
   }
 
-  // --- 1. FLOATING BUBBLE (Messenger Style) ---
-  Widget _buildFloatingBubble(double screenWidth) {
+  // --- 1. FLOATING BUBBLE (Messenger Style Nativo) ---
+  Widget _buildFloatingBubble() {
     return Center(
       key: const ValueKey('bubble'),
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: () async {
           setState(() => _isExpanded = true);
-          // Expandimos la ventana nativa al tamaño del menú
-          await FlutterOverlayWindow.resizeOverlay(320, 500, true);
+          // Expandimos al tamaño del menú
+          await FlutterOverlayWindow.resizeOverlay(320, 520, true);
         },
         child: Container(
-          width: 60,
-          height: 60,
+          width: 66,
+          height: 66,
           decoration: BoxDecoration(
-            color: AppColors.background.withValues(alpha: 0.9),
+            color: AppColors.background.withValues(alpha: 0.95),
             shape: BoxShape.circle,
-            border: Border.all(color: AppColors.primarySpark, width: 2),
+            border: Border.all(color: AppColors.primarySpark, width: 2.5),
             boxShadow: const [
-              BoxShadow(color: Colors.black54, blurRadius: 8, spreadRadius: 1),
+              BoxShadow(
+                  color: Colors.black54,
+                  blurRadius: 12,
+                  spreadRadius: 1
+              ),
             ],
           ),
           child: ClipOval(
@@ -108,8 +83,8 @@ class _OverlayScreenState extends State<OverlayScreen> with TickerProviderStateM
     );
   }
 
-  // --- 2. PANEL DE CONTROL (TARJETA ARRASTRABLE NATIVAMENTE) ---
-  Widget _buildDraggablePanel(double screenWidth) {
+  // --- 2. PANEL DE CONTROL (Diseño Completo) ---
+  Widget _buildDraggablePanel() {
     return Center(
       key: const ValueKey('panel'),
       child: Container(
@@ -117,10 +92,10 @@ class _OverlayScreenState extends State<OverlayScreen> with TickerProviderStateM
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           color: AppColors.background.withValues(alpha: 0.98),
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(28),
           border: Border.all(color: AppColors.borderBlue, width: 2),
           boxShadow: const [
-            BoxShadow(color: Colors.black87, blurRadius: 15, spreadRadius: 2),
+            BoxShadow(color: Colors.black87, blurRadius: 20, spreadRadius: 5),
           ],
         ),
         child: Column(
@@ -136,14 +111,13 @@ class _OverlayScreenState extends State<OverlayScreen> with TickerProviderStateM
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('INIBOT', style: GoogleFonts.inter(
-                  fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primarySpark
+                  fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.primarySpark
                 )),
                 IconButton(
-                  icon: const Icon(Icons.remove, color: Colors.white54),
+                  icon: const Icon(Icons.close, color: Colors.white54),
                   onPressed: () async {
                     setState(() => _isExpanded = false);
-                    // Regresamos al cristal pequeño (150x150)
-                    await FlutterOverlayWindow.resizeOverlay(150, 150, true);
+                    await FlutterOverlayWindow.resizeOverlay(120, 120, true);
                   },
                 ),
               ],
@@ -151,18 +125,19 @@ class _OverlayScreenState extends State<OverlayScreen> with TickerProviderStateM
             const SizedBox(height: 16),
             _buildCriteriaRow('Tienda', '#7178'),
             _buildCriteriaRow('Monto', '> \$20.00'),
+            _buildCriteriaRow('Filtro', 'Compras'),
             const SizedBox(height: 32),
             _buildActionButton(
-              label: _isBotActive ? 'DETENER' : 'ACTIVAR',
-              color: _isBotActive ? Colors.redAccent : Colors.greenAccent.withValues(alpha: 0.2),
-              textColor: _isBotActive ? Colors.white : Colors.greenAccent,
+              label: _isBotActive ? 'DETENER BOT' : 'ACTIVAR BOT',
+              color: _isBotActive ? Colors.redAccent : AppColors.primarySpark,
+              textColor: _isBotActive ? Colors.white : AppColors.background,
               onTap: () => setState(() => _isBotActive = !_isBotActive),
             ),
             const SizedBox(height: 12),
             _buildActionButton(
-              label: 'CERRAR BOT',
+              label: 'CERRAR SISTEMA',
               color: Colors.white10,
-              textColor: Colors.white54,
+              textColor: Colors.white38,
               onTap: () => OverlayUtil.closeOverlay(),
             ),
           ],
