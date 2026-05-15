@@ -30,11 +30,12 @@ class OverlayUtil {
           visibility: NotificationVisibility.visibilityPublic,
           positionGravity: PositionGravity.auto,
           alignment: OverlayAlignment.centerRight,
-          width: 120,
-          height: 120,
+          width: 150,
+          height: 150,
         );
 
-        debugPrint("Overlay mostrado exitosamente");
+        // Resetear el estado de la UI de Flutter (colapsar a burbuja)
+        await FlutterOverlayWindow.shareData('reset_overlay_state');
 
         const MethodChannel _channel = MethodChannel('com.spark.autoclicker/core');
         await _channel.invokeMethod('moveToBackground');

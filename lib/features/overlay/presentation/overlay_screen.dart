@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
@@ -14,33 +15,45 @@ class OverlayScreen extends StatefulWidget {
 class _OverlayScreenState extends State<OverlayScreen> {
   bool _isExpanded = false;
   bool _isBotActive = false;
+  StreamSubscription? _overlaySubscription;
 
   @override
   void initState() {
     super.initState();
     debugPrint("OverlayScreen: initState llamado");
     _isExpanded = false;
+
+    // Escuchar eventos para resetear el estado al recrear el overlay
+    _overlaySubscription = FlutterOverlayWindow.overlayListener.listen((event) {
+      if (event == 'reset_overlay_state') {
+        debugPrint("OverlayScreen: Recibido reset_overlay_state");
+        if (mounted) {
+          setState(() => _isExpanded = false);
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _overlaySubscription?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     debugPrint("OverlayScreen: build llamado (isExpanded: $_isExpanded)");
 
-    MediaQuery.of(context).size;
-
     return Material(
       color: Colors.transparent,
-      child: SizedBox(
-        width: 120,
-        height: 120,
+      child: SizedBox.expand(
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 250),
           child: _isExpanded
               ? _buildDraggablePanel()
               : _buildFloatingBubble(),
         ),
-      )
-
+      ),
     );
   }
 
@@ -56,25 +69,18 @@ class _OverlayScreenState extends State<OverlayScreen> {
           await FlutterOverlayWindow.resizeOverlay(320, 520, true);
         },
         child: Container(
-          width: 66,
-          height: 66,
+          width: 60,
+          height: 60,
           decoration: BoxDecoration(
             color: AppColors.background.withValues(alpha: 0.95),
             shape: BoxShape.circle,
             border: Border.all(color: AppColors.primarySpark, width: 2.5),
-            boxShadow: const [
-              BoxShadow(
-                  color: Colors.black54,
-                  blurRadius: 12,
-                  spreadRadius: 1
-              ),
-            ],
           ),
           child: ClipOval(
             child: Image.asset(
               'public/images/SPARK-LOGO.png',
               fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => 
+              errorBuilder: (context, error, stackTrace) =>
                 const Icon(Icons.smart_toy, color: AppColors.primarySpark, size: 30),
             ),
           ),
@@ -88,15 +94,12 @@ class _OverlayScreenState extends State<OverlayScreen> {
     return Center(
       key: const ValueKey('panel'),
       child: Container(
-        width: 300, 
+        width: 300,
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
           color: AppColors.background.withValues(alpha: 0.98),
           borderRadius: BorderRadius.circular(28),
           border: Border.all(color: AppColors.borderBlue, width: 2),
-          boxShadow: const [
-            BoxShadow(color: Colors.black87, blurRadius: 20, spreadRadius: 5),
-          ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -117,7 +120,7 @@ class _OverlayScreenState extends State<OverlayScreen> {
                   icon: const Icon(Icons.close, color: Colors.white54),
                   onPressed: () async {
                     setState(() => _isExpanded = false);
-                    await FlutterOverlayWindow.resizeOverlay(120, 120, true);
+                    await FlutterOverlayWindow.resizeOverlay(80, 80, true);
                   },
                 ),
               ],
