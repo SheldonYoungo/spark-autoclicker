@@ -22,6 +22,18 @@ class MainActivity : FlutterActivity() {
                     startActivity(intent)
                     result.success(true)
                 }
+                "updateBotConfiguration" -> {
+                    val isActive = call.argument<Boolean>("isActive") ?: false
+                    val minPrice = call.argument<Double>("minPrice") ?: 0.0
+                    val maxDistance = call.argument<Double>("maxDistance") ?: 99.0
+                    val storeId = call.argument<String>("storeId") ?: ""
+                    val orderType = call.argument<String>("orderType") ?: ""
+                    
+                    SparkAccessibilityService.instance?.updateConfig(
+                        isActive, minPrice, maxDistance, storeId, orderType
+                    )
+                    result.success(true)
+                }
                 "moveToBackground" -> {
                     moveTaskToBack(true)
                     result.success(true)

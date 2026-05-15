@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/overlay_util.dart';
+import '../../../core/utils/accessibility_util.dart';
 
 class OverlayScreen extends StatefulWidget {
   const OverlayScreen({super.key});
@@ -134,7 +135,30 @@ class _OverlayScreenState extends State<OverlayScreen> {
               label: _isBotActive ? 'DETENER BOT' : 'ACTIVAR BOT',
               color: _isBotActive ? Colors.redAccent : AppColors.primarySpark,
               textColor: _isBotActive ? Colors.white : AppColors.background,
-              onTap: () => setState(() => _isBotActive = !_isBotActive),
+              onTap: () async {
+                if (!_isBotActive) {
+                  // Verificar si el servicio está habilitado antes de activar
+                  bool isEnabled = await AccessibilityUtil.isServiceEnabled();
+                  if (!isEnabled) {
+                    debugPrint("Servicio de accesibilidad no habilitado. Abriendo ajustes...");
+                    await AccessibilityUtil.openSettings();
+                    return;
+                  }
+                }
+
+                setState(() {
+                  _isBotActive = !_isBotActive;
+                });
+
+                // Sincronizar con el motor nativo (Kotlin)
+                await AccessibilityUtil.updateBotConfiguration(
+                  isActive: _isBotActive,
+                  minPrice: 20.0, // Filtro por defecto (Placeholder hasta tener persistencia)
+                  maxDistance: 5.0, // Filtro por defecto
+                  storeId: "7178", // Filtro por defecto
+                  orderType: "Shopping",
+                );
+              },
             ),
             const SizedBox(height: 12),
             _buildActionButton(
