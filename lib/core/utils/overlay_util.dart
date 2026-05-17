@@ -37,8 +37,8 @@ class OverlayUtil {
         // Resetear el estado de la UI de Flutter (colapsar a burbuja)
         await FlutterOverlayWindow.shareData('reset_overlay_state');
 
-        const MethodChannel _channel = MethodChannel('com.spark.autoclicker/core');
-        await _channel.invokeMethod('moveToBackground');
+        const MethodChannel channel = MethodChannel('com.spark.autoclicker/core');
+        await channel.invokeMethod('moveToBackground');
 
         return null;
       } else {
