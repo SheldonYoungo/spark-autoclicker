@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:spark_autoclicker/core/theme/app_theme.dart';
 import 'package:spark_autoclicker/core/utils/accessibility_util.dart';
 
 class SandboxScreen extends StatefulWidget {
@@ -65,13 +66,15 @@ class _SandboxScreenState extends State<SandboxScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF020E21),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Motor Sandbox'),
+        title: const Text('Motor Sandbox (Pruebas)', style: TextStyle(color: Colors.white)),
         backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
-            icon: const Icon(Icons.delete_sweep),
+            icon: const Icon(Icons.delete_sweep, color: Colors.white54),
             onPressed: () => setState(() => _logs.clear()),
           )
         ],
@@ -86,9 +89,16 @@ class _SandboxScreenState extends State<SandboxScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: const Color(0xFF0043AA)),
+                    color: const Color(0xFF0A1629),
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: AppColors.borderBlue, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.3),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      )
+                    ],
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -96,7 +106,7 @@ class _SandboxScreenState extends State<SandboxScreen> {
                       const Text(
                         'SIMULACIÓN DE OFERTA SPARK',
                         style: TextStyle(
-                          color: Color(0xFFFFE816),
+                          color: AppColors.primarySpark,
                           fontWeight: FontWeight.bold,
                           fontSize: 18,
                         ),
@@ -107,13 +117,16 @@ class _SandboxScreenState extends State<SandboxScreen> {
                         textAlign: TextAlign.center,
                         style: const TextStyle(color: Colors.white, fontSize: 20, height: 1.5),
                       ),
+                      const SizedBox(height: 8),
                       Text(
-                        'Heartbeat: $_heartbeat', 
+                        'Heartbeat (Actividad): $_heartbeat', 
                         style: const TextStyle(color: Colors.white24, fontSize: 10),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 24),
                       Wrap(
                         spacing: 8,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.center,
                         children: [
                           _offerButton('Buena', '45.50', '2.1', '7178', Colors.green),
                           _offerButton('Barata', '12.00', '1.5', '7178', Colors.orange),
@@ -121,45 +134,61 @@ class _SandboxScreenState extends State<SandboxScreen> {
                           _offerButton('Otra Tienda', '40.00', '2.0', '9999', Colors.purple),
                         ],
                       ),
-                      const SizedBox(height: 30),
-                      ElevatedButton(
-                        onPressed: () async {
-                          bool isEnabled = await AccessibilityUtil.isServiceEnabled();
-                          if (!isEnabled) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Activa el servicio en Ajustes')),
+                      const SizedBox(height: 32),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            bool isEnabled = await AccessibilityUtil.isServiceEnabled();
+                            if (!isEnabled) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Activa el servicio en Ajustes')),
+                              );
+                              await AccessibilityUtil.openSettings();
+                              return;
+                            }
+                            
+                            await AccessibilityUtil.updateBotConfiguration(
+                              isActive: true,
+                              minPrice: 20.0,
+                              maxDistance: 5.0,
+                              storeId: "7178",
+                              orderType: "Compras",
                             );
-                            await AccessibilityUtil.openSettings();
-                            return;
-                          }
-                          
-                          await AccessibilityUtil.updateBotConfiguration(
-                            isActive: true,
-                            minPrice: 20.0,
-                            maxDistance: 5.0,
-                            storeId: "7178",
-                            orderType: "Shopping",
-                          );
-                          
-                          setState(() {
-                            _logs.add(">>> CONFIGURACIÓN: >\$20.0, <5mi, Store #7178");
-                          });
-                        },
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-                        child: const Text('1. CONFIGURAR FILTROS (Min \$20, Max 5mi)', style: TextStyle(color: Colors.white)),
-                      ),
-                      const SizedBox(height: 15),
-                      ElevatedButton(
-                        onPressed: () {
-                          setState(() => _isPressed = true);
-                          _logs.add(">>> EVENTO: Botón presionado físicamente");
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _isPressed ? Colors.green : const Color(0xFFFFE816),
-                          foregroundColor: Colors.black,
-                          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                            
+                            setState(() {
+                              _logs.add(">>> CONFIGURACIÓN: >\$20.0, <5mi, Tienda #7178");
+                            });
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.borderBlue,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: const Text('1. APLICAR FILTROS (Min \$20, Max 5mi)', style: TextStyle(fontWeight: FontWeight.bold)),
                         ),
-                        child: const Text('Accept', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () {
+                            setState(() => _isPressed = true);
+                            _logs.add(">>> EVENTO: Botón presionado físicamente");
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isPressed ? Colors.green : AppColors.primarySpark,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          child: const Text('Accept', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'El bot busca la palabra "Accept"',
+                        style: TextStyle(color: Colors.white24, fontSize: 11),
                       ),
                     ],
                   ),
@@ -172,12 +201,12 @@ class _SandboxScreenState extends State<SandboxScreen> {
             flex: 1,
             child: Container(
               width: double.infinity,
-              margin: const EdgeInsets.all(12),
-              padding: const EdgeInsets.all(8),
+              margin: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Colors.black,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white12),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white10),
               ),
               child: ListView.builder(
                 controller: _scrollController,
@@ -205,9 +234,10 @@ class _SandboxScreenState extends State<SandboxScreen> {
 
   Widget _offerButton(String label, String p, String d, String s, Color color) {
     return ActionChip(
-      label: Text(label, style: const TextStyle(fontSize: 10)),
-      backgroundColor: color.withOpacity(0.2),
-      side: BorderSide(color: color),
+      label: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+      backgroundColor: color.withValues(alpha: 0.15),
+      side: BorderSide(color: color.withValues(alpha: 0.5)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       onPressed: () => _updateOffer(p, d, s),
     );
   }

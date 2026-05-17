@@ -7,9 +7,9 @@ class BotFilters {
   BotFilters({
     this.storeCode,
     this.maxDistance = 5.0,
-    this.minPay = 15.0,
-    this.orderTypes = const ['Shopping', 'Pickup'],
-  });
+    double minPay = 20.0,
+    this.orderTypes = const ['Compras', 'Recolección'],
+  }) : minPay = minPay < 20.0 ? 20.0 : minPay;
 
   Map<String, dynamic> toJson() => {
     'storeCode': storeCode,
@@ -18,24 +18,30 @@ class BotFilters {
     'orderTypes': orderTypes,
   };
 
-  factory BotFilters.fromJson(Map<String, dynamic> json) => BotFilters(
-    storeCode: json['storeCode'],
-    maxDistance: (json['maxDistance'] as num).toDouble(),
-    minPay: (json['minPay'] as num).toDouble(),
-    orderTypes: List<String>.from(json['orderTypes'] ?? []),
-  );
+  factory BotFilters.fromJson(Map<String, dynamic> json) {
+    return BotFilters(
+      storeCode: json['storeCode'] as String?,
+      maxDistance: (json['maxDistance'] as num?)?.toDouble() ?? 5.0,
+      minPay: (json['minPay'] as num?)?.toDouble() ?? 20.0,
+      orderTypes: json['orderTypes'] != null 
+          ? List<String>.from(json['orderTypes']) 
+          : const ['Compras', 'Recolección'],
+    );
+  }
 
   BotFilters copyWith({
-    String? storeCode,
+    Object? storeCode = _sentinel,
     double? maxDistance,
     double? minPay,
     List<String>? orderTypes,
   }) {
     return BotFilters(
-      storeCode: storeCode ?? this.storeCode,
+      storeCode: storeCode == _sentinel ? this.storeCode : (storeCode as String?),
       maxDistance: maxDistance ?? this.maxDistance,
       minPay: minPay ?? this.minPay,
       orderTypes: orderTypes ?? this.orderTypes,
     );
   }
+
+  static const _sentinel = Object();
 }

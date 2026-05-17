@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../../core/theme/app_theme.dart';
-
-import 'package:spark_autoclicker/core/utils/overlay_util.dart';
+import 'package:spark_autoclicker/core/theme/app_theme.dart';
+import 'package:spark_autoclicker/features/automation/presentation/sandbox_screen.dart';
+import 'package:spark_autoclicker/features/automation/presentation/widgets/filter_card.dart';
+import '../../../core/utils/overlay_util.dart';
+import '../data/filter_service.dart';
+import '../domain/filter_model.dart';
 
 class BotMainScreen extends StatefulWidget {
   const BotMainScreen({super.key});
@@ -12,9 +16,351 @@ class BotMainScreen extends StatefulWidget {
 }
 
 class _BotMainScreenState extends State<BotMainScreen> {
+  final FilterService _filterService = FilterService();
+
   @override
   void initState() {
     super.initState();
+    _filterService.loadFilters();
+  }
+
+  void _showStoreModal(String? currentVal) {
+    final TextEditingController controller =
+        TextEditingController(text: currentVal ?? '');
+    _showStyledModal(
+      title: 'Código de Tienda',
+      subtitle: 'Ingresa el número de tienda de Walmart (ej: 7178)',
+      child: TextField(
+        controller: controller,
+        autofocus: true,
+        keyboardType: TextInputType.number,
+        style: const TextStyle(
+            color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+        textAlign: TextAlign.center,
+        decoration: InputDecoration(
+          prefixText: '#',
+          prefixStyle:
+              const TextStyle(color: AppColors.primarySpark, fontSize: 24),
+          filled: true,
+          fillColor: Colors.white.withValues(alpha: 0.05),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none),
+          hintText: '0000',
+          hintStyle: const TextStyle(color: Colors.white24),
+        ),
+      ),
+      onSave: () {
+        final val = controller.text.trim();
+        _filterService
+            .saveFilters(_filterService.filtersNotifier.value.copyWith(
+          storeCode: val.isEmpty ? null : val,
+        ));
+      },
+    );
+  }
+
+  void _showDistanceModal(double currentVal) {
+    double tempVal = currentVal;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => _StyledModalContainer(
+          title: 'Distancia Máxima',
+          subtitle: 'Radio máximo para aceptar órdenes',
+          onSave: () {
+            _filterService.saveFilters(_filterService.filtersNotifier.value
+                .copyWith(maxDistance: tempVal));
+            Navigator.pop(context);
+          },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${tempVal.toInt()} mi',
+                style: GoogleFonts.inter(
+                    fontSize: 48,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.white),
+              ),
+              Slider(
+                value: tempVal,
+                min: 1,
+                max: 50,
+                divisions: 49,
+                activeColor: AppColors.secondaryCian,
+                inactiveColor: Colors.white10,
+                onChanged: (val) => setModalState(() => tempVal = val),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('1 mi', style: TextStyle(color: Colors.white24)),
+                    Text('50 mi', style: TextStyle(color: Colors.white24)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showPayModal(double currentVal) {
+    double tempVal = currentVal < 20 ? 20 : currentVal;
+    final TextEditingController controller =
+        TextEditingController(text: tempVal.toStringAsFixed(0));
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return Padding(
+            padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom),
+            child: _StyledModalContainer(
+              title: 'Tarifa Mínima',
+              subtitle: 'Tarifa mínima aceptable por orden (Mín. \$20)',
+              onSave: () {
+                double? p = double.tryParse(controller.text);
+                if (p == null || p < 20) p = 20;
+
+                _filterService.saveFilters(
+                    _filterService.filtersNotifier.value.copyWith(minPay: p));
+                Navigator.pop(context);
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _buildStepperButton(
+                        icon: Icons.remove,
+                        onPressed: tempVal <= 20
+                            ? null
+                            : () {
+                                setModalState(() {
+                                  tempVal--;
+                                  controller.text = tempVal.toStringAsFixed(0);
+                                });
+                              },
+                      ),
+                      const SizedBox(width: 16),
+                      SizedBox(
+                        width: 140,
+                        child: TextField(
+                          controller: controller,
+                          autofocus: true,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            _MinPayInputFormatter(min: 20),
+                          ],
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 48,
+                              fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                          decoration: const InputDecoration(
+                            prefixText: '\$',
+                            prefixStyle: TextStyle(
+                                color: AppColors.primarySpark, fontSize: 32),
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          onChanged: (val) {
+                            final double? p = double.tryParse(val);
+                            if (p != null) {
+                              setModalState(() {
+                                tempVal = p;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      _buildStepperButton(
+                        icon: Icons.add,
+                        onPressed: () {
+                          setModalState(() {
+                            tempVal++;
+                            controller.text = tempVal.toStringAsFixed(0);
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [20, 25, 30, 40]
+                        .map((val) => ActionChip(
+                              label: Text('\$$val'),
+                              labelStyle: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold),
+                              backgroundColor:
+                                  Colors.white.withValues(alpha: 0.05),
+                              side: BorderSide(
+                                  color: Colors.white.withValues(alpha: 0.1)),
+                              onPressed: () {
+                                setModalState(() {
+                                  tempVal = val.toDouble();
+                                  controller.text = val.toString();
+                                });
+                              },
+                            ))
+                        .toList(),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildStepperButton(
+      {required IconData icon, VoidCallback? onPressed}) {
+    final bool isDisabled = onPressed == null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+                color: isDisabled
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : AppColors.primarySpark.withValues(alpha: 0.3)),
+            color: isDisabled
+                ? Colors.white.withValues(alpha: 0.02)
+                : AppColors.primarySpark.withValues(alpha: 0.05),
+          ),
+          child: Icon(
+            icon,
+            color: isDisabled
+                ? Colors.white.withValues(alpha: 0.1)
+                : AppColors.primarySpark,
+            size: 24,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showOrderTypeModal(List<String> currentTypes) {
+    List<String> tempTypes = List.from(currentTypes);
+    final options = ['Compras', 'Recolección', 'Multiviajes'];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => _StyledModalContainer(
+          title: 'Tipos de Orden',
+          subtitle: 'Selecciona las categorías que deseas recibir',
+          onSave: () {
+            _filterService.saveFilters(_filterService.filtersNotifier.value
+                .copyWith(orderTypes: tempTypes));
+            Navigator.pop(context);
+          },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                alignment: WrapAlignment.center,
+                children: options.map((opt) {
+                  final isSelected = tempTypes.contains(opt);
+                  return FilterChip(
+                    label: Text(opt),
+                    selected: isSelected,
+                    onSelected: (val) {
+                      setModalState(() {
+                        if (val) {
+                          tempTypes.add(opt);
+                        } else {
+                          tempTypes.remove(opt);
+                        }
+                      });
+                    },
+                    selectedColor:
+                        AppColors.primarySpark.withValues(alpha: 0.2),
+                    checkmarkColor: AppColors.primarySpark,
+                    labelStyle: TextStyle(
+                      color: isSelected ? AppColors.primarySpark : Colors.white,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                    backgroundColor: Colors.white.withValues(alpha: 0.05),
+                    side: BorderSide(
+                      color: isSelected
+                          ? AppColors.primarySpark.withValues(alpha: 0.5)
+                          : Colors.white.withValues(alpha: 0.1),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => setModalState(() => tempTypes.clear()),
+                child: const Text('DESELECCIONAR TODOS',
+                    style: TextStyle(
+                        color: AppColors.secondaryCian, fontSize: 12)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showStyledModal(
+      {required String title,
+      required String subtitle,
+      required Widget child,
+      required VoidCallback onSave}) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (context) => Padding(
+        padding:
+            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: _StyledModalContainer(
+          title: title,
+          subtitle: subtitle,
+          onSave: () {
+            onSave();
+            Navigator.pop(context);
+          },
+          child: child,
+        ),
+      ),
+    );
   }
 
   @override
@@ -23,245 +369,395 @@ class _BotMainScreenState extends State<BotMainScreen> {
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: const BoxDecoration(
-          color: AppColors.background,
-        ),
+        decoration: const BoxDecoration(color: AppColors.background),
         child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header (Node 47:399)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: ValueListenableBuilder<BotFilters>(
+            valueListenable: _filterService.filtersNotifier,
+            builder: (context, filters, _) {
+              return SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 24.0, vertical: 16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    // Header
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'SPARK APP',
-                          style: GoogleFonts.inter(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.white,
-                          ),
-                        ),
-                        Text(
-                          'By Sheldon & Valentina',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: AppColors.textDisabled,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Icon(Icons.settings, color: AppColors.white),
-                  ],
-                ),
-                const SizedBox(height: 32),
-
-                // Hero Card (INIBOT) (Node 21:124)
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [Color(0xFF0043AA), AppColors.background],
-                    ),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: AppColors.borderBlue),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'INIBOT',
-                            style: GoogleFonts.inter(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.primarySpark,
-                            ),
-                          ),
-                          const Icon(Icons.bolt,
-                              color: AppColors.primarySpark, size: 24),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Abre el cuadro flotante y pulsa Activar seguirá revisando la pantalla hasta tomar una oferta que coincida',
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          color: AppColors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Tipo de orden: Compras · Recolección',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: AppColors.secondaryCian,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 32),
-
-                // Grid de Filtros 2x2 (Node 21:82)
-                GridView.count(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 16,
-                  crossAxisSpacing: 16,
-                  childAspectRatio: 0.9,
-                  children: [
-                    _buildFilterCard(
-                      'Código de Walmart',
-                      'Ingresa el código de tienda',
-                      Icons.storefront,
-                    ),
-                    _buildFilterCard(
-                      'Distancia',
-                      'Define radio de búsqueda',
-                      Icons.map_outlined,
-                    ),
-                    _buildFilterCard(
-                      'Orden',
-                      'Elige tipos de orden',
-                      Icons.shopping_bag_outlined,
-                    ),
-                    _buildFilterCard(
-                      'Tarifa',
-                      'Monto mínimo de oferta',
-                      Icons.payments_outlined,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 32),
-
-                // IA Speed Boost (Node 28:195)
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.primarySpark.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(Icons.speed,
-                            color: AppColors.primarySpark),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
+                        Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Impulso de velocidad IA',
+                              'SPARK APP',
                               style: GoogleFonts.inter(
-                                fontSize: 16,
+                                fontSize: 24,
                                 fontWeight: FontWeight.bold,
                                 color: AppColors.white,
+                                letterSpacing: -0.5,
                               ),
                             ),
                             Text(
-                              'Frecuencia de escaneo: 1x',
+                              'By Sheldon & Valentina',
                               style: GoogleFonts.inter(
                                 fontSize: 12,
-                                color: AppColors.secondaryCian,
+                                color: Colors.white.withValues(alpha: 0.4),
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 40),
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.bug_report_outlined,
+                                  color: AppColors.secondaryCian),
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => const SandboxScreen()),
+                              ),
+                            ),
+                            const Icon(Icons.settings_outlined,
+                                color: AppColors.white),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
 
-                // Botón "Abrir Panel Flotante"
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () async {
-                      final String? message = await OverlayUtil.showOverlay();
-                      if (message != null && mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(message),
-                            backgroundColor: message.contains('activo') ? Colors.blue : Colors.redAccent,
+                    _buildHeroCard(filters),
+                    const SizedBox(height: 32),
+
+                    GridView.count(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 16,
+                      crossAxisSpacing: 16,
+                      childAspectRatio: 0.85,
+                      children: [
+                        FilterCard(
+                          title: 'Tienda Walmart',
+                          value: filters.storeCode != null
+                              ? '#${filters.storeCode}'
+                              : 'TODAS',
+                          icon: Icons.storefront_outlined,
+                          onTap: () => _showStoreModal(filters.storeCode),
+                        ),
+                        FilterCard(
+                          title: 'Distancia Máx.',
+                          value: filters.maxDistance.toStringAsFixed(0),
+                          unit: 'mi',
+                          icon: Icons.map_outlined,
+                          accentColor: AppColors.primarySpark,
+                          onTap: () => _showDistanceModal(filters.maxDistance),
+                        ),
+                        FilterCard(
+                          title: 'Tipos de Orden',
+                          value: filters.orderTypes.isEmpty
+                              ? 'TODAS'
+                              : filters.orderTypes.length.toString(),
+                          unit: filters.orderTypes.isEmpty
+                              ? null
+                              : (filters.orderTypes.length == 1
+                                  ? 'categoría'
+                                  : 'categorías'),
+                          icon: Icons.shopping_bag_outlined,
+                          onTap: () => _showOrderTypeModal(filters.orderTypes),
+                        ),
+                        FilterCard(
+                          title: 'Pago Mín.',
+                          value: '\$${filters.minPay.toStringAsFixed(0)}',
+                          icon: Icons.payments_outlined,
+                          accentColor: AppColors.primarySpark,
+                          onTap: () => _showPayModal(filters.minPay),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
+
+                    _buildSpeedBoostCard(),
+                    const SizedBox(height: 40),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color:
+                                  AppColors.primarySpark.withValues(alpha: 0.2),
+                              blurRadius: 20,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            final String? message =
+                                await OverlayUtil.showOverlay();
+                            if (message != null && mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(message),
+                                  backgroundColor: AppColors.borderBlue,
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primarySpark,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 20),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
+                            elevation: 0,
                           ),
-                        );
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primarySpark,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(vertical: 18),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                          child: Text(
+                            'ABRIR PANEL FLOTANTE',
+                            style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1),
+                          ),
+                        ),
                       ),
                     ),
-                    child: Text(
-                      'MOSTRAR OVERLAY',
-                      style: GoogleFonts.inter(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
+                    const SizedBox(height: 24),
+                  ],
                 ),
-              ],
-            ),
+              );
+            },
           ),
         ),
       ),
     );
   }
 
-  Widget _buildFilterCard(String title, String subtitle, IconData icon) {
+  Widget _buildHeroCard(BotFilters filters) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white10),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFF0043AA).withValues(alpha: 0.8),
+            AppColors.background,
+          ],
+        ),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: AppColors.borderBlue, width: 2.0),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0043AA).withValues(alpha: 0.3),
+            blurRadius: 25,
+            offset: const Offset(0, 10),
+          )
+        ],
       ),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: AppColors.secondaryCian, size: 32),
-          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.primarySpark.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.bolt,
+                        color: AppColors.primarySpark, size: 16),
+                    const SizedBox(width: 4),
+                    Text(
+                      'INIBOT ACTIVO',
+                      style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.primarySpark),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.more_horiz, color: Colors.white24),
+            ],
+          ),
+          const SizedBox(height: 20),
           Text(
-            title,
-            textAlign: TextAlign.center,
+            'Auto-Aceptación de Alta Velocidad',
             style: GoogleFonts.inter(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: AppColors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: AppColors.white),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'El bot escaneará y aceptará órdenes que coincidan con tus criterios con un comportamiento humano.',
+            style: GoogleFonts.inter(
+                fontSize: 13,
+                color: Colors.white.withValues(alpha: 0.7),
+                height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpeedBoostCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0A1629),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.borderBlue.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.secondaryCian.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.speed, color: AppColors.secondaryCian),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Impulso de Velocidad IA',
+                  style: GoogleFonts.inter(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.white),
+                ),
+                Text(
+                  'Frecuencia: 1.5x (Seguro)',
+                  style: GoogleFonts.inter(
+                      fontSize: 12, color: AppColors.secondaryCian),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 10,
-              color: AppColors.textDisabled,
+          Switch(
+            value: true,
+            onChanged: (v) {},
+            activeColor: AppColors.secondaryCian,
+            activeTrackColor: AppColors.secondaryCian.withValues(alpha: 0.2),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MinPayInputFormatter extends TextInputFormatter {
+  final int min;
+
+  _MinPayInputFormatter({required this.min});
+
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    // Permitir vacío temporalmente para facilitar el borrado total y re-escritura
+    if (newValue.text.isEmpty) return newValue;
+
+    // Bloquear '0' inicial si es el único carácter (Regla 1)
+    if (newValue.text == '0') return oldValue;
+
+    // Eliminar ceros a la izquierda para evitar "025" -> "25"
+    String text = newValue.text;
+    if (text.startsWith('0') && text.length > 1) {
+      text = text.replaceFirst(RegExp(r'^0+'), '');
+    }
+
+    final int? val = int.tryParse(text);
+    if (val == null) return oldValue;
+
+    // Si el valor resultante es < 20, forzarlo a "20" inmediatamente (Regla 2)
+    if (val < min) {
+      return TextEditingValue(
+        text: min.toString(),
+        selection: TextSelection.collapsed(offset: min.toString().length),
+      );
+    }
+
+    // Si se limpiaron ceros a la izquierda, devolver el texto corregido
+    if (text != newValue.text) {
+      return TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+    }
+
+    return newValue;
+  }
+}
+
+class _StyledModalContainer extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final Widget child;
+  final VoidCallback onSave;
+
+  const _StyledModalContainer(
+      {required this.title,
+      required this.subtitle,
+      required this.child,
+      required this.onSave});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(32),
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+                color: Colors.white12, borderRadius: BorderRadius.circular(2)),
+          ),
+          const SizedBox(height: 24),
+          Text(title,
+              style: GoogleFonts.inter(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.white)),
+          const SizedBox(height: 8),
+          Text(subtitle,
+              style: GoogleFonts.inter(
+                  fontSize: 14, color: Colors.white.withValues(alpha: 0.6)),
+              textAlign: TextAlign.center),
+          const SizedBox(height: 32),
+          child,
+          const SizedBox(height: 40),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: onSave,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primarySpark,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16)),
+              ),
+              child: const Text('CONFIRMAR CAMBIOS',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ),
         ],

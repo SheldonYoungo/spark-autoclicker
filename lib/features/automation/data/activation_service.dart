@@ -10,6 +10,8 @@ class ActivationService {
   final DeviceInfoPlugin _deviceInfo = DeviceInfoPlugin();
 
   static const String _keyLinkedUid = 'linked_uid';
+  static const String _keyExpiration = 'auth_expiration_ts';
+  static const String _keyStatus = 'auth_status';
 
   /// Notificador para que la UI reaccione a cambios de activación en tiempo real
   static final ValueNotifier<String?> linkedUidNotifier = ValueNotifier<String?>(null);
@@ -24,12 +26,21 @@ class ActivationService {
   Future<String> getDeviceId() async {
     if (Platform.isAndroid) {
       final androidInfo = await _deviceInfo.androidInfo;
-      return androidInfo.id; // En Android, 'id' es confiable para hardware
+      return androidInfo.id;
     } else if (Platform.isIOS) {
       final iosInfo = await _deviceInfo.iosInfo;
       return iosInfo.identifierForVendor ?? 'unknown_ios';
     }
     return 'unknown_platform';
+  }
+
+  /// Persiste datos de autenticación localmente para el Overlay Isolate
+  Future<void> _saveAuthDataLocally(UserModel user, String uid) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyLinkedUid, uid);
+    await prefs.setInt(_keyExpiration, user.expirationDate.millisecondsSinceEpoch);
+    await prefs.setString(_keyStatus, user.status.name);
+    linkedUidNotifier.value = uid;
   }
 
   /// Validar una llave de activación y vincular el dispositivo si hay slots disponibles
@@ -53,14 +64,11 @@ class ActivationService {
       // 3. Validar slots
       final currentDeviceId = await getDeviceId();
       if (user.authorizedDeviceIds.contains(currentDeviceId)) {
-        // Ya está vinculado, solo activamos el status si estaba pendiente
         if (user.status == UserStatus.pending) {
           await _db.ref('users/$uid').update({'status': UserStatus.active.name});
         }
-        // Guardar localmente para acceso rápido
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_keyLinkedUid, uid);
-        return null; // Éxito (ya vinculado)
+        await _saveAuthDataLocally(user, uid);
+        return null;
       }
 
       if (!user.hasAvailableSlots) {
@@ -73,14 +81,11 @@ class ActivationService {
       await _db.ref('users/$uid').update({
         'authorizedDeviceIds': updatedDeviceIds,
         'status': UserStatus.active.name,
-        'activationKey': null, // Quemamos la llave tras el primer uso exitoso en este dispositivo
+        'activationKey': null,
       });
 
-      // Guardar localmente para acceso rápido
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_keyLinkedUid, uid);
-
-      return null; // Éxito
+      await _saveAuthDataLocally(user, uid);
+      return null;
     } catch (e) {
       return 'Error durante la activación: $e';
     }
@@ -88,68 +93,38 @@ class ActivationService {
 
   /// Validar una llave de activación buscando directamente en el nodo público (O(1))
   Future<String?> activateDeviceWithKeyOnly(String key, String deviceId) async {
-    if (key == '9999') {
-      return 'Acceso administrativo requerido.';
-    }
+    if (key == '9999') return 'Acceso administrativo requerido.';
 
     try {
-      // 1. Buscar la llave en el nodo público con timeout
-      final keySnapshot = await _db.ref('activation_keys/$key').get().timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw Exception('Tiempo de espera agotado al buscar la llave.'),
-      );
-
-      if (!keySnapshot.exists) {
-        return 'La llave es incorrecta o ya fue usada.';
-      }
+      final keySnapshot = await _db.ref('activation_keys/$key').get().timeout(const Duration(seconds: 10));
+      if (!keySnapshot.exists) return 'La llave es incorrecta o ya fue usada.';
 
       final keyData = Map<String, dynamic>.from(keySnapshot.value as Map);
       final String uid = keyData['uid'];
 
-      // 2. Obtener datos completos del usuario
-      final userSnapshot = await _db.ref('users/$uid').get().timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw Exception('Tiempo de espera agotado al conectar con el servidor.'),
-      );
-
+      final userSnapshot = await _db.ref('users/$uid').get().timeout(const Duration(seconds: 10));
       if (!userSnapshot.exists) return 'Error interno: Usuario no encontrado.';
 
       final user = UserModel.fromJson(Map<String, dynamic>.from(userSnapshot.value as Map));
 
-      // 3. Validar expiración
       if (DateTime.now().isAfter(user.expirationDate)) {
         return 'Tu suscripción ha expirado. Contacta al administrador.';
       }
 
-      // 4. Validar slots
       List<String> updatedDeviceIds = List<String>.from(user.authorizedDeviceIds);
       if (!updatedDeviceIds.contains(deviceId)) {
-        if (!user.hasAvailableSlots) {
-          return 'Has alcanzado el límite de dispositivos (${user.maxSlots}).';
-        }
+        if (!user.hasAvailableSlots) return 'Has alcanzado el límite de dispositivos (${user.maxSlots}).';
         updatedDeviceIds.add(deviceId);
       }
 
-      // 5. Activar Usuario en RTDB
       await _db.ref('users/$uid').update({
         'status': UserStatus.active.name,
         'authorizedDeviceIds': updatedDeviceIds,
-        // No ponemos activationKey a null para que el usuario pueda re-usarla si es necesario
       });
 
-      // 6. Guardar localmente
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_keyLinkedUid, uid);
-      linkedUidNotifier.value = uid; // Notificar a la UI del cambio de estado
-
-      // 7. Ya no borramos la llave del nodo público para permitir re-activación
-      // _db.ref('activation_keys/$key').remove().catchError((_) => null);
-
+      await _saveAuthDataLocally(user, uid);
       return null;
     } catch (e) {
-      if (e.toString().contains('Permission denied')) {
-        return 'Error de seguridad (Firebase): Verifica las reglas.';
-      }
       return 'Error: ${e.toString().split(':').last.trim()}';
     }
   }
@@ -159,19 +134,13 @@ class ActivationService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final uid = prefs.getString(_keyLinkedUid);
-      
       if (uid == null) return false;
 
       final deviceId = await getDeviceId();
-      final snapshot = await _db.ref('users/$uid').get().timeout(
-        const Duration(seconds: 5),
-        onTimeout: () => throw Exception('Timeout'),
-      );
-      
+      final snapshot = await _db.ref('users/$uid').get().timeout(const Duration(seconds: 5));
       if (!snapshot.exists) return false;
 
-      final userData = Map<String, dynamic>.from(snapshot.value as Map);
-      final user = UserModel.fromJson(userData);
+      final user = UserModel.fromJson(Map<String, dynamic>.from(snapshot.value as Map));
       
       final isValid = user.role == UserRole.driver && 
              user.authorizedDeviceIds.contains(deviceId) && 
@@ -180,6 +149,8 @@ class ActivationService {
 
       if (!isValid) {
         await clearLocalLink();
+      } else {
+        await _saveAuthDataLocally(user, uid);
       }
       
       return isValid;
@@ -197,18 +168,17 @@ class ActivationService {
       if (!event.snapshot.exists) return false;
       
       try {
-        final userData = Map<String, dynamic>.from(event.snapshot.value as Map);
-        final user = UserModel.fromJson(userData);
-        
+        final user = UserModel.fromJson(Map<String, dynamic>.from(event.snapshot.value as Map));
         final isValid = user.role == UserRole.driver && 
                user.authorizedDeviceIds.contains(deviceId) && 
                user.isActive &&
                !DateTime.now().isAfter(user.expirationDate);
 
         if (!isValid) {
-          clearLocalLink(); // Limpieza automática si se invalida
+          clearLocalLink();
+        } else {
+          _saveAuthDataLocally(user, uid);
         }
-        
         return isValid;
       } catch (e) {
         return false;
@@ -216,10 +186,12 @@ class ActivationService {
     });
   }
 
-  /// Cerrar sesión local (limpiar vinculación de hardware local)
+  /// Cerrar sesión local
   Future<void> clearLocalLink() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyLinkedUid);
-    linkedUidNotifier.value = null; // Notificar a la UI para expulsar al usuario
+    await prefs.remove(_keyExpiration);
+    await prefs.remove(_keyStatus);
+    linkedUidNotifier.value = null;
   }
 }

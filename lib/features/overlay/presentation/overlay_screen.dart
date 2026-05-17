@@ -5,6 +5,8 @@ import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/overlay_util.dart';
 import '../../../core/utils/accessibility_util.dart';
+import '../../automation/data/filter_service.dart';
+import '../../automation/domain/filter_model.dart';
 
 class OverlayScreen extends StatefulWidget {
   const OverlayScreen({super.key});
@@ -16,23 +18,43 @@ class OverlayScreen extends StatefulWidget {
 class _OverlayScreenState extends State<OverlayScreen> {
   bool _isExpanded = false;
   bool _isBotActive = false;
+  bool _isValidating = false;
   StreamSubscription? _overlaySubscription;
+  final FilterService _filterService = FilterService();
 
   @override
   void initState() {
     super.initState();
-    debugPrint("OverlayScreen: initState llamado");
     _isExpanded = false;
+    _loadInitialFilters();
 
-    // Escuchar eventos para resetear el estado al recrear el overlay
     _overlaySubscription = FlutterOverlayWindow.overlayListener.listen((event) {
+      debugPrint("Overlay recibió evento: $event");
       if (event == 'reset_overlay_state') {
-        debugPrint("OverlayScreen: Recibido reset_overlay_state");
-        if (mounted) {
-          setState(() => _isExpanded = false);
-        }
+        if (mounted) setState(() => _isExpanded = false);
+      } else if (event == 'refresh_filters') {
+        _handleFiltersRefresh();
       }
     });
+  }
+
+  Future<void> _handleFiltersRefresh() async {
+    // Pequeño delay para asegurar que el I/O del isolate principal terminó
+    await Future.delayed(const Duration(milliseconds: 150));
+    await _loadInitialFilters();
+    
+    // Si el bot está activo, re-sincronizamos con el motor nativo con los nuevos valores
+    if (_isBotActive) {
+      await _filterService.syncWithNative(true);
+    }
+  }
+
+  Future<void> _loadInitialFilters() async {
+    // forceReload: true es CRÍTICO aquí porque el Overlay corre en su propio Isolate
+    await _filterService.loadFilters(forceReload: true);
+    if (mounted) {
+      setState(() {}); // Forzamos rebuild para reflejar cambios en UI
+    }
   }
 
   @override
@@ -43,13 +65,17 @@ class _OverlayScreenState extends State<OverlayScreen> {
 
   @override
   Widget build(BuildContext context) {
-    debugPrint("OverlayScreen: build llamado (isExpanded: $_isExpanded)");
-
     return Material(
       color: Colors.transparent,
       child: SizedBox.expand(
         child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 250),
+          duration: const Duration(milliseconds: 300),
+          transitionBuilder: (Widget child, Animation<double> animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(scale: animation, child: child),
+            );
+          },
           child: _isExpanded
               ? _buildDraggablePanel()
               : _buildFloatingBubble(),
@@ -58,31 +84,39 @@ class _OverlayScreenState extends State<OverlayScreen> {
     );
   }
 
-  // --- 1. FLOATING BUBBLE (Messenger Style Nativo) ---
   Widget _buildFloatingBubble() {
     return Center(
       key: const ValueKey('bubble'),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () async {
-          setState(() => _isExpanded = true);
-          // Expandimos al tamaño del menú
-          await FlutterOverlayWindow.resizeOverlay(320, 520, true);
+          await _loadInitialFilters();
+          if (mounted) {
+            setState(() => _isExpanded = true);
+            await FlutterOverlayWindow.resizeOverlay(320, 560, true);
+          }
         },
         child: Container(
-          width: 60,
-          height: 60,
+          width: 70, height: 70,
           decoration: BoxDecoration(
-            color: AppColors.background.withValues(alpha: 0.95),
+            gradient: const LinearGradient(
+              colors: [Color(0xFF0A1629), Color(0xFF020E21)],
+            ),
             shape: BoxShape.circle,
             border: Border.all(color: AppColors.primarySpark, width: 2.5),
+            boxShadow: [
+              BoxShadow(color: AppColors.primarySpark.withValues(alpha: 0.25), blurRadius: 15),
+            ],
           ),
-          child: ClipOval(
-            child: Image.asset(
-              'public/images/SPARK-LOGO.png',
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) =>
-                const Icon(Icons.smart_toy, color: AppColors.primarySpark, size: 30),
+          child: Padding(
+            padding: const EdgeInsets.all(4.0),
+            child: ClipOval(
+              child: Image.asset(
+                'public/images/SPARK-LOGO.png',
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                  const Icon(Icons.smart_toy, color: AppColors.primarySpark, size: 30),
+              ),
             ),
           ),
         ),
@@ -90,35 +124,32 @@ class _OverlayScreenState extends State<OverlayScreen> {
     );
   }
 
-  // --- 2. PANEL DE CONTROL (Diseño Completo) ---
   Widget _buildDraggablePanel() {
     return Center(
       key: const ValueKey('panel'),
       child: Container(
         width: 300,
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         decoration: BoxDecoration(
-          color: AppColors.background.withValues(alpha: 0.98),
+          gradient: const LinearGradient(
+            colors: [Color(0xFF0A1629), Color(0xFF020E21)],
+          ),
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: AppColors.borderBlue, width: 2),
+          border: Border.all(color: AppColors.borderBlue.withValues(alpha: 0.8), width: 1.5),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
-            ),
+            // Handle bar
+            Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(10))),
+            
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('INIBOT', style: GoogleFonts.inter(
-                  fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.primarySpark
-                )),
+                Text('SPARK BOT', style: GoogleFonts.orbitron(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.white)),
                 IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white54),
+                  icon: const Icon(Icons.close, color: Colors.white38),
                   onPressed: () async {
                     setState(() => _isExpanded = false);
                     await FlutterOverlayWindow.resizeOverlay(80, 80, true);
@@ -126,45 +157,45 @@ class _OverlayScreenState extends State<OverlayScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            _buildCriteriaRow('Tienda', '#7178'),
-            _buildCriteriaRow('Monto', '> \$20.00'),
-            _buildCriteriaRow('Filtro', 'Compras'),
-            const SizedBox(height: 32),
-            _buildActionButton(
-              label: _isBotActive ? 'DETENER BOT' : 'ACTIVAR BOT',
-              color: _isBotActive ? Colors.redAccent : AppColors.primarySpark,
-              textColor: _isBotActive ? Colors.white : AppColors.background,
-              onTap: () async {
-                if (!_isBotActive) {
-                  // Verificar si el servicio está habilitado antes de activar
-                  bool isEnabled = await AccessibilityUtil.isServiceEnabled();
-                  if (!isEnabled) {
-                    debugPrint("Servicio de accesibilidad no habilitado. Abriendo ajustes...");
-                    await AccessibilityUtil.openSettings();
-                    return;
+            
+            const SizedBox(height: 24),
+            
+            ValueListenableBuilder<BotFilters>(
+              valueListenable: _filterService.filtersNotifier,
+              builder: (context, filters, _) {
+                final String storeDisplay = filters.storeCode?.isNotEmpty == true 
+                    ? '#${filters.storeCode}' : 'TODAS';
+                
+                String typesDisplay = 'TODAS';
+                if (filters.orderTypes.isNotEmpty) {
+                  if (filters.orderTypes.length > 2) {
+                    typesDisplay = '${filters.orderTypes.length} CATEGORÍAS';
+                  } else {
+                    typesDisplay = filters.orderTypes.join(', ').toUpperCase();
                   }
                 }
 
-                setState(() {
-                  _isBotActive = !_isBotActive;
-                });
-
-                // Sincronizar con el motor nativo (Kotlin)
-                await AccessibilityUtil.updateBotConfiguration(
-                  isActive: _isBotActive,
-                  minPrice: 20.0, // Filtro por defecto (Placeholder hasta tener persistencia)
-                  maxDistance: 5.0, // Filtro por defecto
-                  storeId: "7178", // Filtro por defecto
-                  orderType: "Shopping",
-                );
+                return _buildCriteriaCard(filters, storeDisplay, typesDisplay);
               },
             ),
+            
+            const SizedBox(height: 28),
+            
+            if (_isValidating)
+              const CircularProgressIndicator(color: AppColors.primarySpark)
+            else
+              _buildActionButton(
+                label: _isBotActive ? 'DETENER BOT' : 'ACTIVAR BOT',
+                isPrimary: !_isBotActive,
+                isDanger: _isBotActive,
+                onTap: _handleBotToggle,
+              ),
+            
             const SizedBox(height: 12),
+            
             _buildActionButton(
               label: 'CERRAR SISTEMA',
-              color: Colors.white10,
-              textColor: Colors.white38,
+              isSecondary: true,
               onTap: () => OverlayUtil.closeOverlay(),
             ),
           ],
@@ -173,29 +204,77 @@ class _OverlayScreenState extends State<OverlayScreen> {
     );
   }
 
-  Widget _buildCriteriaRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+  Widget _buildCriteriaCard(BotFilters filters, String store, String types) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+      ),
+      child: Column(
         children: [
-          Text(label, style: GoogleFonts.inter(fontSize: 14, color: Colors.white38)),
-          Text(value, style: GoogleFonts.inter(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)),
+          _buildCriteriaRow('Tienda', store),
+          const Divider(height: 20, color: Colors.white10),
+          _buildCriteriaRow('Pago Mín.', '> \$${filters.minPay.toStringAsFixed(2)}'),
+          const Divider(height: 20, color: Colors.white10),
+          _buildCriteriaRow('Distancia', '< ${filters.maxDistance.toStringAsFixed(1)} mi'),
+          const Divider(height: 20, color: Colors.white10),
+          _buildCriteriaRow('Categorías', types),
         ],
       ),
     );
   }
 
-  Widget _buildActionButton({required String label, required Color color, required Color textColor, required VoidCallback onTap}) {
+  Future<void> _handleBotToggle() async {
+    if (!_isBotActive) {
+      setState(() => _isValidating = true);
+      
+      bool isEnabled = await AccessibilityUtil.isServiceEnabled();
+      if (!isEnabled) {
+        setState(() => _isValidating = false);
+        await AccessibilityUtil.openSettings();
+        return;
+      }
+      
+      bool isValid = await _filterService.isSessionValid();
+      if (!isValid) {
+        setState(() => _isValidating = false);
+        return;
+      }
+      
+      await _loadInitialFilters();
+    }
+
+    setState(() {
+      _isBotActive = !_isBotActive;
+      _isValidating = false;
+    });
+
+    await _filterService.syncWithNative(_isBotActive);
+  }
+
+  Widget _buildCriteriaRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: GoogleFonts.inter(fontSize: 12, color: Colors.white70, fontWeight: FontWeight.w600)),
+        const SizedBox(width: 12),
+        Expanded(child: Text(value.toUpperCase(), style: GoogleFonts.inter(fontSize: 11, color: AppColors.secondaryCian, fontWeight: FontWeight.bold), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis)),
+      ],
+    );
+  }
+
+  Widget _buildActionButton({required String label, required VoidCallback onTap, bool isPrimary = false, bool isDanger = false, bool isSecondary = false}) {
+    Color bgColor = isPrimary ? AppColors.primarySpark : (isDanger ? Colors.redAccent : Colors.white10);
+    Color textColor = isPrimary ? Colors.black : Colors.white;
     return InkWell(
       onTap: onTap,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(16)),
-        child: Center(child: Text(label, style: GoogleFonts.inter(
-          fontSize: 14, fontWeight: FontWeight.bold, color: textColor
-        ))),
+        decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(14)),
+        child: Center(child: Text(label, style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w900, color: textColor))),
       ),
     );
   }
