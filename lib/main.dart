@@ -2,16 +2,19 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:spark_autoclicker/core/theme/app_theme.dart';
 import 'package:spark_autoclicker/features/admin/presentation/login_screen.dart';
 import 'package:spark_autoclicker/features/admin/presentation/admin_dashboard.dart';
 import 'package:spark_autoclicker/features/automation/presentation/bot_main_screen.dart';
 import 'package:spark_autoclicker/features/automation/data/activation_service.dart';
+import 'package:spark_autoclicker/features/automation/data/filter_service.dart';
 import 'package:spark_autoclicker/features/overlay/presentation/overlay_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  SemanticsBinding.instance.ensureSemantics(); // FUERZA a Flutter a crear el árbol de accesibilidad
   await dotenv.load(fileName: ".env");
 
   try {
@@ -24,8 +27,9 @@ void main() async {
         databaseURL: dotenv.get('FIREBASE_DATABASE_URL'),
       ),
     );
-    // Cargar estado inicial de activación de hardware
+    // Cargar estado inicial de activación de hardware y filtros
     await ActivationService().init();
+    await FilterService().loadFilters();
   } catch (e) {
     debugPrint("Error al inicializar Firebase: $e");
   }

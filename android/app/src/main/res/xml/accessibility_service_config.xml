@@ -5,5 +5,4 @@
     android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
-    android:notificationTimeout="100"
-    android:packageNames="com.walmart.android.delivery.driver" />
+    android:notificationTimeout="100" />

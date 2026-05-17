@@ -8,11 +8,15 @@ import io.flutter.plugin.common.MethodChannel
 import com.spark.autoclicker.core.SparkAccessibilityService
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.spark.autoclicker/core"
+    companion object {
+        const val CHANNEL = "com.spark.autoclicker/core"
+        var methodChannel: MethodChannel? = null
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+        methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        methodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
                 "isServiceEnabled" -> {
                     result.success(SparkAccessibilityService.instance != null)
