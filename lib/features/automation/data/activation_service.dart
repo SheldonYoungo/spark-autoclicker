@@ -3,6 +3,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'dart:io';
+import '../../../core/network/ntp_service.dart';
 import '../../admin/domain/user_model.dart';
 
 class ActivationService {
@@ -13,16 +14,19 @@ class ActivationService {
   static const String _keyExpiration = 'auth_expiration_ts';
   static const String _keyStatus = 'auth_status';
 
-  /// Notificador para que la UI reaccione a cambios de activación en tiempo real
   static final ValueNotifier<String?> linkedUidNotifier = ValueNotifier<String?>(null);
+  static final ValueNotifier<DateTime?> expirationDateNotifier = ValueNotifier<DateTime?>(null);
+  static final ValueNotifier<bool> showExpiredBanner = ValueNotifier<bool>(false);
 
-  /// Cargar el estado inicial de activación
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     linkedUidNotifier.value = prefs.getString(_keyLinkedUid);
+    final expTs = prefs.getInt(_keyExpiration);
+    if (expTs != null) {
+      expirationDateNotifier.value = DateTime.fromMillisecondsSinceEpoch(expTs);
+    }
   }
 
-  /// Obtener el ID único del dispositivo actual
   Future<String> getDeviceId() async {
     if (Platform.isAndroid) {
       final androidInfo = await _deviceInfo.androidInfo;
@@ -34,16 +38,26 @@ class ActivationService {
     return 'unknown_platform';
   }
 
-  /// Persiste datos de autenticación localmente para el Overlay Isolate
+  Future<bool> _isExpired(DateTime expirationDate) async {
+    try {
+      final now = await NtpService.getNetworkTime();
+      return now.isAfter(expirationDate);
+    } catch (e) {
+      // Si falla el NTP, por seguridad asumimos que no podemos validar y por ende bloqueamos
+      debugPrint("ActivationService: Error validando expiración vía NTP: $e");
+      return true; 
+    }
+  }
+
   Future<void> _saveAuthDataLocally(UserModel user, String uid) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyLinkedUid, uid);
     await prefs.setInt(_keyExpiration, user.expirationDate.millisecondsSinceEpoch);
     await prefs.setString(_keyStatus, user.status.name);
     linkedUidNotifier.value = uid;
+    expirationDateNotifier.value = user.expirationDate;
   }
 
-  /// Validar una llave de activación y vincular el dispositivo si hay slots disponibles
   Future<String?> activateKey(String uid, String key) async {
     try {
       final snapshot = await _db.ref('users/$uid').get();
@@ -51,23 +65,21 @@ class ActivationService {
 
       final user = UserModel.fromJson(Map<String, dynamic>.from(snapshot.value as Map));
       
-      // 1. Validar llave
       if (user.activationKey != key) {
         return 'La llave de activación es incorrecta.';
       }
 
-      // 2. Validar expiración
-      if (DateTime.now().isAfter(user.expirationDate)) {
-        return 'Tu suscripción ha expirado. Contacta al administrador.';
+      if (await _isExpired(user.expirationDate)) {
+        return 'Suscripción expirada o error de red (NTP).';
       }
 
-      // 3. Validar slots
       final currentDeviceId = await getDeviceId();
       if (user.authorizedDeviceIds.contains(currentDeviceId)) {
         if (user.status == UserStatus.pending) {
           await _db.ref('users/$uid').update({'status': UserStatus.active.name});
         }
         await _saveAuthDataLocally(user, uid);
+        showExpiredBanner.value = false;
         return null;
       }
 
@@ -75,7 +87,6 @@ class ActivationService {
         return 'Has alcanzado el límite de dispositivos (${user.maxSlots}).';
       }
 
-      // 4. Vincular nuevo dispositivo
       final updatedDeviceIds = List<String>.from(user.authorizedDeviceIds)..add(currentDeviceId);
       
       await _db.ref('users/$uid').update({
@@ -85,13 +96,13 @@ class ActivationService {
       });
 
       await _saveAuthDataLocally(user, uid);
+      showExpiredBanner.value = false;
       return null;
     } catch (e) {
       return 'Error durante la activación: $e';
     }
   }
 
-  /// Validar una llave de activación buscando directamente en el nodo público (O(1))
   Future<String?> activateDeviceWithKeyOnly(String key, String deviceId) async {
     if (key == '9999') return 'Acceso administrativo requerido.';
 
@@ -107,8 +118,8 @@ class ActivationService {
 
       final user = UserModel.fromJson(Map<String, dynamic>.from(userSnapshot.value as Map));
 
-      if (DateTime.now().isAfter(user.expirationDate)) {
-        return 'Tu suscripción ha expirado. Contacta al administrador.';
+      if (await _isExpired(user.expirationDate)) {
+        return 'Suscripción expirada o error de red (NTP).';
       }
 
       List<String> updatedDeviceIds = List<String>.from(user.authorizedDeviceIds);
@@ -123,13 +134,13 @@ class ActivationService {
       });
 
       await _saveAuthDataLocally(user, uid);
+      showExpiredBanner.value = false;
       return null;
     } catch (e) {
       return 'Error: ${e.toString().split(':').last.trim()}';
     }
   }
 
-  /// Verificar si este dispositivo está autorizado de forma eficiente
   Future<bool> isCurrentDeviceAuthorized() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -142,12 +153,14 @@ class ActivationService {
 
       final user = UserModel.fromJson(Map<String, dynamic>.from(snapshot.value as Map));
       
+      final bool expired = await _isExpired(user.expirationDate);
       final isValid = user.role == UserRole.driver && 
              user.authorizedDeviceIds.contains(deviceId) && 
              user.isActive &&
-             !DateTime.now().isAfter(user.expirationDate);
+             !expired;
 
       if (!isValid) {
+        if (expired) showExpiredBanner.value = true;
         await clearLocalLink();
       } else {
         await _saveAuthDataLocally(user, uid);
@@ -160,24 +173,26 @@ class ActivationService {
     }
   }
 
-  /// Escuchar cambios en tiempo real para el estado de autenticación del chofer
   Stream<bool> authStateStream(String uid) async* {
     final deviceId = await getDeviceId();
     
-    yield* _db.ref('users/$uid').onValue.map((event) {
+    yield* _db.ref('users/$uid').onValue.asyncMap((event) async {
       if (!event.snapshot.exists) return false;
       
       try {
         final user = UserModel.fromJson(Map<String, dynamic>.from(event.snapshot.value as Map));
+        final bool expired = await _isExpired(user.expirationDate);
+        
         final isValid = user.role == UserRole.driver && 
                user.authorizedDeviceIds.contains(deviceId) && 
                user.isActive &&
-               !DateTime.now().isAfter(user.expirationDate);
+               !expired;
 
         if (!isValid) {
-          clearLocalLink();
+          if (expired) showExpiredBanner.value = true;
+          await clearLocalLink();
         } else {
-          _saveAuthDataLocally(user, uid);
+          await _saveAuthDataLocally(user, uid);
         }
         return isValid;
       } catch (e) {
@@ -186,12 +201,12 @@ class ActivationService {
     });
   }
 
-  /// Cerrar sesión local
   Future<void> clearLocalLink() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyLinkedUid);
     await prefs.remove(_keyExpiration);
     await prefs.remove(_keyStatus);
     linkedUidNotifier.value = null;
+    expirationDateNotifier.value = null;
   }
 }

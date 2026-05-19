@@ -7,7 +7,7 @@ class NtpService {
   static const String fallbackServer = 'pool.ntp.org';
 
   /// Obtiene la hora actual desde servidores NTP.
-  /// Devuelve la hora de la red si es posible, de lo contrario la hora local (con advertencia).
+  /// Lanza una excepción si falla para evitar bypass de seguridad con la hora local.
   static Future<DateTime> getNetworkTime() async {
     try {
       return await _fetchNtpTime(primaryServer);
@@ -16,45 +16,49 @@ class NtpService {
       try {
         return await _fetchNtpTime(fallbackServer);
       } catch (e2) {
-        debugPrint('NTP Fallback failed: $e2. Using local time (Unsafe).');
-        return DateTime.now();
+        debugPrint('NTP Fallback failed: $e2. Security breach blocked.');
+        throw Exception('SECURITY_CLOCK_ERROR: No se pudo validar la hora de red.');
       }
     }
   }
 
   static Future<DateTime> _fetchNtpTime(String server) async {
     final List<int> ntpData = List<int>.filled(48, 0);
-    ntpData[0] = 0x1B; // LI = 0 (no warning), VN = 3 (IPv4 only), Mode = 3 (Client)
+    ntpData[0] = 0x1B; // LI = 0, VN = 3, Mode = 3
 
-    final RawDatagramSocket socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-    final InternetAddress address = (await InternetAddress.lookup(server)).first;
-    
-    socket.send(ntpData, address, 123);
-    
-    final Completer<DateTime> completer = Completer<DateTime>();
-    
-    socket.listen((RawSocketEvent event) {
-      if (event == RawSocketEvent.read) {
-        final Datagram? dg = socket.receive();
-        if (dg != null && dg.data.length >= 48) {
-          final int secondsSince1900 = _parseTimestamp(dg.data, 40);
-          final DateTime networkTime = DateTime.fromMillisecondsSinceEpoch(
-            (secondsSince1900 - 2208988800) * 1000,
-            isUtc: true,
-          );
-          completer.complete(networkTime.toLocal());
-          socket.close();
+    RawDatagramSocket? socket;
+    try {
+      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      final addresses = await InternetAddress.lookup(server);
+      if (addresses.isEmpty) throw Exception('Address not found');
+      
+      final InternetAddress address = addresses.first;
+      socket.send(ntpData, address, 123);
+      
+      final Completer<DateTime> completer = Completer<DateTime>();
+      
+      socket.listen((RawSocketEvent event) {
+        if (event == RawSocketEvent.read) {
+          final Datagram? dg = socket?.receive();
+          if (dg != null && dg.data.length >= 48) {
+            final int secondsSince1900 = _parseTimestamp(dg.data, 40);
+            final DateTime networkTime = DateTime.fromMillisecondsSinceEpoch(
+              (secondsSince1900 - 2208988800) * 1000,
+              isUtc: true,
+            );
+            if (!completer.isCompleted) completer.complete(networkTime.toLocal());
+          }
         }
-      }
-    });
+      });
 
-    return completer.future.timeout(const Duration(seconds: 4), onTimeout: () {
-      socket.close();
-      throw Exception('NTP Timeout');
-    });
+      return await completer.future.timeout(const Duration(seconds: 4));
+    } finally {
+      socket?.close();
+    }
   }
 
   static int _parseTimestamp(Uint8List data, int offset) {
+    // Unsigned 32-bit integer to avoid negative values on high timestamps
     return (data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3];
   }
 }

@@ -224,6 +224,7 @@ class _SandboxScreenState extends State<SandboxScreen> {
                             bool isEnabled =
                                 await AccessibilityUtil.isServiceEnabled();
                             if (!isEnabled) {
+                              if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                     content:

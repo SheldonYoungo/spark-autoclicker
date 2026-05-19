@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:spark_autoclicker/core/theme/app_theme.dart';
 import 'package:spark_autoclicker/features/automation/presentation/sandbox_screen.dart';
 import 'package:spark_autoclicker/features/automation/presentation/widgets/filter_card.dart';
+import 'package:spark_autoclicker/features/automation/data/activation_service.dart';
 import '../../../core/utils/overlay_util.dart';
 import '../data/filter_service.dart';
 import '../domain/filter_model.dart';
@@ -19,6 +20,7 @@ class BotMainScreen extends StatefulWidget {
 class _BotMainScreenState extends State<BotMainScreen> {
   final FilterService _filterService = FilterService();
   StreamSubscription? _overlaySubscription;
+  Timer? _ticker;
 
   @override
   void initState() {
@@ -35,6 +37,11 @@ class _BotMainScreenState extends State<BotMainScreen> {
 
     // Log diagnóstico: verificar que el notifier cambia cuando el Overlay hace toggle
     _filterService.isBotActiveNotifier.addListener(_onBotActiveChanged);
+
+    // Ticker para actualizar el contador de tiempo restante cada minuto
+    _ticker = Timer.periodic(const Duration(minutes: 1), (timer) {
+      if (mounted) setState(() {});
+    });
   }
 
   void _onBotActiveChanged() {
@@ -43,9 +50,27 @@ class _BotMainScreenState extends State<BotMainScreen> {
 
   @override
   void dispose() {
+    _ticker?.cancel();
     _filterService.isBotActiveNotifier.removeListener(_onBotActiveChanged);
     _overlaySubscription?.cancel();
     super.dispose();
+  }
+
+  String _getRemainingTime(DateTime? expiration) {
+    if (expiration == null) return '---';
+    final now = DateTime.now();
+    final diff = expiration.difference(now);
+    if (diff.isNegative) return 'Expirado';
+    if (diff.inDays > 0) return '${diff.inDays}d ${diff.inHours % 24}h';
+    if (diff.inHours > 0) return '${diff.inHours}h ${diff.inMinutes % 60}m';
+    return '${diff.inMinutes}m restantes';
+  }
+
+  Color _getRemainingColor(DateTime? expiration) {
+    if (expiration == null) return Colors.white24;
+    final diff = expiration.difference(DateTime.now());
+    if (diff.inHours < 24) return Colors.orangeAccent;
+    return AppColors.secondaryCian;
   }
 
   void _showStoreModal(String? currentVal) {
@@ -413,7 +438,7 @@ class _BotMainScreenState extends State<BotMainScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header con Logo
+                    // Header con Logo y Estado de Suscripción
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -422,7 +447,7 @@ class _BotMainScreenState extends State<BotMainScreen> {
                             Hero(
                               tag: 'app_logo',
                               child: Image.asset(
-                                'public/images/SPARK-LOGO.png',
+                                'public/images/SPARK-LOGO-BIG.png',
                                 height: 42,
                                 filterQuality: FilterQuality.high,
                               ),
@@ -440,12 +465,31 @@ class _BotMainScreenState extends State<BotMainScreen> {
                                     letterSpacing: -0.5,
                                   ),
                                 ),
-                                Text(
-                                  'By Sheldon & Valentina',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 10,
-                                    color: Colors.white.withValues(alpha: 0.4),
-                                  ),
+                                ValueListenableBuilder<DateTime?>(
+                                  valueListenable: ActivationService.expirationDateNotifier,
+                                  builder: (context, expiration, _) {
+                                    return Row(
+                                      children: [
+                                        Container(
+                                          width: 6,
+                                          height: 6,
+                                          decoration: BoxDecoration(
+                                            color: _getRemainingColor(expiration),
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'Suscripción: ${_getRemainingTime(expiration)}',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                            color: _getRemainingColor(expiration).withValues(alpha: 0.8),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
                                 ),
                               ],
                             ),
@@ -462,8 +506,26 @@ class _BotMainScreenState extends State<BotMainScreen> {
                                     builder: (_) => const SandboxScreen()),
                               ),
                             ),
-                            const Icon(Icons.settings_outlined,
-                                color: AppColors.white),
+                            IconButton(
+                              icon: const Icon(Icons.logout, color: Colors.white54, size: 20),
+                              onPressed: () async {
+                                final bool confirm = await showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    backgroundColor: AppColors.background,
+                                    title: const Text('Cerrar Sesión', style: TextStyle(color: Colors.white)),
+                                    content: const Text('¿Estás seguro de que deseas desvincular este dispositivo?', style: TextStyle(color: Colors.white70)),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCELAR')),
+                                      TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('CERRAR SESIÓN', style: TextStyle(color: Colors.redAccent))),
+                                    ],
+                                  )
+                                ) ?? false;
+                                if (confirm) {
+                                  await ActivationService().clearLocalLink();
+                                }
+                              },
+                            ),
                           ],
                         ),
                       ],
@@ -542,7 +604,7 @@ class _BotMainScreenState extends State<BotMainScreen> {
                           onPressed: () async {
                             final String? message =
                                 await OverlayUtil.showOverlay();
-                            if (message != null && mounted) {
+                            if (message != null && context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(message),

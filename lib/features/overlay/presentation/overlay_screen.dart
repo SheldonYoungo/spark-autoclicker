@@ -4,7 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/overlay_util.dart';
-import '../../../core/utils/accessibility_util.dart';
 import '../../automation/data/filter_service.dart';
 import '../../automation/domain/filter_model.dart';
 
@@ -18,7 +17,6 @@ class OverlayScreen extends StatefulWidget {
 class _OverlayScreenState extends State<OverlayScreen> {
   bool _isExpanded = false;
   bool _isValidating = false;
-  Completer<bool>? _accessibilityCompleter;
   StreamSubscription? _overlaySubscription;
   final FilterService _filterService = FilterService();
 
@@ -35,44 +33,24 @@ class _OverlayScreenState extends State<OverlayScreen> {
       } else if (event == 'refresh_filters') {
         _handleFiltersRefresh();
       } else if (event == 'bot_activated' || event == 'bot_deactivated') {
-        // Cuando recibimos confirmación del Isolate principal, detenemos la carga
         if (mounted) setState(() => _isValidating = false);
-      } else if (event is Map && event['type'] == 'accessibility_result') {
-        _accessibilityCompleter?.complete(event['enabled'] == true);
       }
     });
   }
 
-  Future<bool> _proxyIsServiceEnabled() async {
-    _accessibilityCompleter = Completer<bool>();
-    await FlutterOverlayWindow.shareData('request_accessibility_check');
-    // Timeout de 2 segundos por seguridad
-    return _accessibilityCompleter!.future.timeout(
-      const Duration(seconds: 2),
-      onTimeout: () => false,
-    );
-  }
-
-  Future<void> _proxyOpenSettings() async {
-    await FlutterOverlayWindow.shareData('request_open_settings');
-  }
 
   Future<void> _handleFiltersRefresh() async {
-    // Pequeño delay para asegurar que el I/O del isolate principal terminó
     await Future.delayed(const Duration(milliseconds: 150));
     await _loadInitialFilters();
-    
-    // Si el bot está activo, re-sincronizamos con el motor nativo con los nuevos valores
     if (_filterService.isBotActiveNotifier.value) {
       await _filterService.syncWithNative(true);
     }
   }
 
   Future<void> _loadInitialFilters() async {
-    // forceReload: true es CRÍTICO aquí porque el Overlay corre en su propio Isolate
     await _filterService.loadFilters(forceReload: true);
     if (mounted) {
-      setState(() {}); // Forzamos rebuild para reflejar cambios en UI
+      setState(() {});
     }
   }
 
@@ -110,7 +88,6 @@ class _OverlayScreenState extends State<OverlayScreen> {
         behavior: HitTestBehavior.opaque,
         onTap: () async {
           await _loadInitialFilters();
-          // CRÍTICO: Redimensionar ANTES de mostrar el panel para evitar overflow
           await FlutterOverlayWindow.resizeOverlay(320, 560, true);
           if (mounted) {
             setState(() => _isExpanded = true);
@@ -119,42 +96,39 @@ class _OverlayScreenState extends State<OverlayScreen> {
         child: ValueListenableBuilder<bool>(
           valueListenable: _filterService.isBotActiveNotifier,
           builder: (context, isActive, _) {
+            // Colores vibrantes para estados, evitando el amarillo "sucio"
+            final Color statusColor = isActive 
+                ? const Color(0xFF00FF88) // Verde Neón Vibrante (Active)
+                : const Color(0xFFFF3333); // Rojo Intenso (Inactive)
+            
             return AnimatedContainer(
               duration: const Duration(milliseconds: 400),
+              curve: Curves.easeInOut,
               width: 70, height: 70,
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: isActive 
-                      ? [AppColors.primarySpark, const Color(0xFF0043AA)]
-                      : [const Color(0xFF0A1629), const Color(0xFF020E21)],
+                // Fondo oscuro profundo consistente para que el logo y el borde resalten
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF0D1B3E), Color(0xFF020E21)],
                 ),
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: isActive ? Colors.white : AppColors.primarySpark, 
-                  width: isActive ? 3.5 : 2.5
+                  color: statusColor, 
+                  width: isActive ? 3.5 : 2.5,
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: (isActive ? AppColors.primarySpark : Colors.black)
-                        .withValues(alpha: isActive ? 0.6 : 0.25), 
-                    blurRadius: isActive ? 20 : 15,
-                    spreadRadius: isActive ? 2 : 0
-                  ),
-                ],
               ),
               child: Padding(
                 padding: const EdgeInsets.all(4.0),
-                child: ClipOval(
-                  child: Image.asset(
-                    'public/images/SPARK-LOGO-BIG.png',
-                    fit: BoxFit.cover,
-                    color: isActive ? Colors.white : null,
-                    colorBlendMode: isActive ? BlendMode.srcIn : null,
-                    errorBuilder: (context, error, stackTrace) =>
-                      Icon(isActive ? Icons.bolt : Icons.smart_toy, 
-                        color: isActive ? Colors.white : AppColors.primarySpark, 
-                        size: 30),
-                  ),
+                child: Image.asset(
+                  'public/images/SPARK-LOGO-BIG.png',
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) =>
+                    Icon(
+                      isActive ? Icons.bolt : Icons.smart_toy, 
+                      color: statusColor, 
+                      size: 28,
+                    ),
                 ),
               ),
             );
@@ -180,7 +154,6 @@ class _OverlayScreenState extends State<OverlayScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Handle bar
             Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 20),
               decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(10))),
             
@@ -191,7 +164,6 @@ class _OverlayScreenState extends State<OverlayScreen> {
                 IconButton(
                   icon: const Icon(Icons.close, color: Colors.white38),
                   onPressed: () async {
-                    // Redimensionar ANTES de colapsar para evitar overflow transitorio
                     await FlutterOverlayWindow.resizeOverlay(80, 80, true);
                     if (mounted) {
                       setState(() => _isExpanded = false);
@@ -276,13 +248,8 @@ class _OverlayScreenState extends State<OverlayScreen> {
 
   Future<void> _handleBotToggle(bool currentState) async {
     final bool newState = !currentState;
-    
     if (mounted) setState(() => _isValidating = true);
-
     try {
-      // El toggleBot de FilterService ahora detecta si está en el Overlay
-      // y delega la ejecución real (incluyendo validaciones) al Isolate Principal.
-      // Esperamos el evento 'bot_activated' o 'bot_deactivated' para quitar el spinner.
       await _filterService.toggleBot(newState);
     } catch (e) {
       debugPrint("Overlay: Error al solicitar toggle del bot: $e");

@@ -268,145 +268,196 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32.0),
-            child: Column(
-              children: [
-                const Spacer(flex: 2),
-                
-                // Logo Oficial con Gesto Secreto
-                GestureDetector(
-                  onLongPress: _showSecretAdminLogin,
-                  child: Hero(
-                    tag: 'app_logo',
-                    child: Image.asset(
-                      'public/images/SPARK-LOGO-BIG.png',
-                      height: 200,
-                      filterQuality: FilterQuality.high,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'VINCULACIÓN DE HARDWARE',
-                  style: GoogleFonts.inter(
-                    color: AppColors.primarySpark,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 3,
-                  ),
-                ),
-                
-                const Spacer(flex: 3),
-
-                // Cuadro de Vinculación (PIN)
-                Text(
-                  'INGRESA TU LLAVE',
-                  style: GoogleFonts.inter(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: List.generate(4, (index) {
-                    return Container(
-                      width: 60,
-                      height: 70,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white24),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32.0),
+                child: Column(
+                  children: [
+                    const Spacer(flex: 2),
+                    
+                    // Logo Oficial con Gesto Secreto
+                    GestureDetector(
+                      onLongPress: _showSecretAdminLogin,
+                      child: Hero(
+                        tag: 'app_logo',
+                        child: Image.asset(
+                          'public/images/SPARK-LOGO-BIG.png',
+                          height: 200,
+                          filterQuality: FilterQuality.high,
+                        ),
                       ),
-                      child: Center(
-                        child: TextField(
-                          controller: _pinControllers[index],
-                          focusNode: _pinFocusNodes[index],
-                          textAlign: TextAlign.center,
-                          keyboardType: TextInputType.number,
-                          maxLength: 1,
-                          style: GoogleFonts.jetBrainsMono(
-                            color: AppColors.primarySpark,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold,
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'VINCULACIÓN DE HARDWARE',
+                      style: GoogleFonts.inter(
+                        color: AppColors.primarySpark,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 3,
+                      ),
+                    ),
+                    
+                    const Spacer(flex: 3),
+
+                    // Cuadro de Vinculación (PIN)
+                    Text(
+                      'INGRESA TU LLAVE',
+                      style: GoogleFonts.inter(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: List.generate(4, (index) {
+                        return Container(
+                          width: 60,
+                          height: 70,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.white24),
                           ),
-                          decoration: const InputDecoration(counterText: '', border: InputBorder.none),
-                          onChanged: (value) {
-                            if (value.isNotEmpty && index < 3) {
-                              _pinFocusNodes[index + 1].requestFocus();
-                            } else if (value.isEmpty && index > 0) {
-                              _pinFocusNodes[index - 1].requestFocus();
-                            }
-                            
-                            final currentKey = _pinControllers.map((c) => c.text).join();
-                            if (currentKey.length == 4) {
-                              _handleActivation();
-                            }
-                          },
+                          child: Center(
+                            child: TextField(
+                              controller: _pinControllers[index],
+                              focusNode: _pinFocusNodes[index],
+                              textAlign: TextAlign.center,
+                              keyboardType: TextInputType.number,
+                              maxLength: 1,
+                              style: GoogleFonts.jetBrainsMono(
+                                color: AppColors.primarySpark,
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              decoration: const InputDecoration(counterText: '', border: InputBorder.none),
+                              onChanged: (value) {
+                                if (value.isNotEmpty && index < 3) {
+                                  _pinFocusNodes[index + 1].requestFocus();
+                                } else if (value.isEmpty && index > 0) {
+                                  _pinFocusNodes[index - 1].requestFocus();
+                                }
+                                
+                                final currentKey = _pinControllers.map((c) => c.text).join();
+                                if (currentKey.length == 4) {
+                                  _handleActivation();
+                                }
+                              },
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+
+                    if (_errorMessage != null) ...[
+                      const SizedBox(height: 24),
+                      Text(
+                        _errorMessage!,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+
+                    const Spacer(flex: 2),
+
+                    // Device Info Card
+                    GestureDetector(
+                      onTap: _copyDeviceId,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.white10),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              'ID DE HARDWARE:',
+                              style: GoogleFonts.inter(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _deviceId,
+                              style: GoogleFonts.jetBrainsMono(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '(Toca para copiar)',
+                              style: GoogleFonts.inter(color: Colors.white24, fontSize: 9),
+                            ),
+                          ],
                         ),
                       ),
-                    );
-                  }),
-                ),
-
-                if (_errorMessage != null) ...[
-                  const SizedBox(height: 24),
-                  Text(
-                    _errorMessage!,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                ],
-
-                const Spacer(flex: 2),
-
-                // Device Info Card
-                GestureDetector(
-                  onTap: _copyDeviceId,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white10),
                     ),
-                    child: Column(
-                      children: [
-                        Text(
-                          'ID DE HARDWARE:',
-                          style: GoogleFonts.inter(color: Colors.white38, fontSize: 9, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          _deviceId,
-                          style: GoogleFonts.jetBrainsMono(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          '(Toca para copiar)',
-                          style: GoogleFonts.inter(color: Colors.white24, fontSize: 9),
-                        ),
-                      ],
-                    ),
-                  ),
+                    
+                    const Spacer(flex: 2),
+                    
+                    if (_isLoading)
+                      const CircularProgressIndicator(color: AppColors.primarySpark)
+                    else
+                      Text(
+                        'Spark Engine v1.0.2',
+                        style: GoogleFonts.inter(color: Colors.white10, fontSize: 10),
+                      ),
+                      
+                    const SizedBox(height: 24),
+                  ],
                 ),
-                
-                const Spacer(flex: 2),
-                
-                if (_isLoading)
-                  const CircularProgressIndicator(color: AppColors.primarySpark)
-                else
-                  Text(
-                    'Spark Engine v1.0.2',
-                    style: GoogleFonts.inter(color: Colors.white10, fontSize: 10),
-                  ),
-                  
-                const SizedBox(height: 24),
-              ],
-            ),
+              ),
+              
+              // Banner de Expiración
+              ValueListenableBuilder<bool>(
+                valueListenable: ActivationService.showExpiredBanner,
+                builder: (context, show, _) {
+                  if (!show) return const SizedBox.shrink();
+                  return Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.orangeAccent.withValues(alpha: 0.95),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4))
+                        ]
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: Colors.black),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'SUSCRIPCIÓN VENCIDA',
+                                  style: GoogleFonts.inter(color: Colors.black, fontWeight: FontWeight.w900, fontSize: 12),
+                                ),
+                                Text(
+                                  'Tu tiempo de uso ha terminado. Contacta al administrador para renovar.',
+                                  style: GoogleFonts.inter(color: Colors.black87, fontSize: 11),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.black, size: 20),
+                            onPressed: () => ActivationService.showExpiredBanner.value = false,
+                          )
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
         ),
       ),

@@ -27,14 +27,14 @@ class DeviceInfo {
 }
 
 class UserModel {
-  final String id; // El ID único o teléfono
+  final String id;
   final String name;
   final UserRole role;
   final UserStatus status;
   final DateTime expirationDate;
-  final List<String> authorizedDeviceIds; // Slots de hardware
-  final int maxSlots; // Cantidad máxima de dispositivos permitidos
-  final String? activationKey; // La llave que genera el admin
+  final List<String> authorizedDeviceIds;
+  final int maxSlots;
+  final String? activationKey;
 
   UserModel({
     required this.id,
@@ -43,11 +43,13 @@ class UserModel {
     required this.status,
     required this.expirationDate,
     required this.authorizedDeviceIds,
-    this.maxSlots = 1, // Por defecto 1 slot
+    this.maxSlots = 1,
     this.activationKey,
   });
 
-  bool get isActive => status == UserStatus.active && DateTime.now().isBefore(expirationDate);
+  /// Verifica si el estado del usuario es activo. 
+  /// NOTA: No valida expiración vía NTP. Usar ActivationService para validación de seguridad.
+  bool get isActive => status == UserStatus.active;
 
   bool get isAdmin => role == UserRole.admin;
 
