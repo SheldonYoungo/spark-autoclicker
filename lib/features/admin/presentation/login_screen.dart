@@ -274,20 +274,19 @@ class _LoginScreenState extends State<LoginScreen> {
               children: [
                 const Spacer(flex: 2),
                 
-                // Logo Discreto con Gesto Secreto
+                // Logo Oficial con Gesto Secreto
                 GestureDetector(
                   onLongPress: _showSecretAdminLogin,
-                  child: Text(
-                    'SPARK APP',
-                    style: GoogleFonts.montserrat(
-                      color: Colors.white,
-                      fontSize: 36,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 6,
+                  child: Hero(
+                    tag: 'app_logo',
+                    child: Image.asset(
+                      'public/images/SPARK-LOGO-BIG.png',
+                      height: 200,
+                      filterQuality: FilterQuality.high,
                     ),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 24),
                 Text(
                   'VINCULACIÓN DE HARDWARE',
                   style: GoogleFonts.inter(

@@ -146,7 +146,7 @@ class _OverlayScreenState extends State<OverlayScreen> {
                 padding: const EdgeInsets.all(4.0),
                 child: ClipOval(
                   child: Image.asset(
-                    'public/images/SPARK-LOGO.png',
+                    'public/images/SPARK-LOGO-BIG.png',
                     fit: BoxFit.cover,
                     color: isActive ? Colors.white : null,
                     colorBlendMode: isActive ? BlendMode.srcIn : null,

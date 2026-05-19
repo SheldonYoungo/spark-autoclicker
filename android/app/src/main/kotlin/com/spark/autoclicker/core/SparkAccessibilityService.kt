@@ -178,24 +178,35 @@ class SparkAccessibilityService : AccessibilityService() {
             return
         }
 
-        val jitterX = x + Random.nextInt(-3, 3).toFloat()
-        val jitterY = y + Random.nextInt(-3, 3).toFloat()
-        
-        logToFlutter("🖱️ Ejecutando clic en ($jitterX, $jitterY)...")
+        // Retraso aleatorio (Jitter temporal) entre 150ms y 400ms
+        val delayMs = Random.nextLong(150, 400)
 
-        val path = Path()
-        path.moveTo(jitterX, jitterY)
-        val gestureBuilder = GestureDescription.Builder()
-        gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, 45)) 
-        
-        dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                logToFlutter("⚡ Gesto completado con éxito")
-            }
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                logToFlutter("❌ Gesto CANCELADO por el sistema")
-            }
-        }, null)
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (!isBotActive) return@postDelayed
+
+            // Variación de coordenadas (Jitter espacial) de +/- 10px
+            val jitterX = x + Random.nextInt(-10, 10).toFloat()
+            val jitterY = y + Random.nextInt(-10, 10).toFloat()
+
+            // Duración aleatoria de la pulsación entre 40ms y 80ms para mayor realismo
+            val strokeDuration = Random.nextLong(40, 80)
+
+            logToFlutter("🖱️ Ejecutando clic en ($jitterX, $jitterY) tras ${delayMs}ms de análisis...")
+
+            val path = Path()
+            path.moveTo(jitterX, jitterY)
+            val gestureBuilder = GestureDescription.Builder()
+            gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, strokeDuration))
+
+            dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    logToFlutter("⚡ Gesto completado con éxito (Humano simulado)")
+                }
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    logToFlutter("❌ Gesto CANCELADO por el sistema")
+                }
+            }, null)
+        }, delayMs)
     }
 
     override fun onInterrupt() {

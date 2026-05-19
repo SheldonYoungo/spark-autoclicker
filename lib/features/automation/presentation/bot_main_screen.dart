@@ -413,28 +413,41 @@ class _BotMainScreenState extends State<BotMainScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header
+                    // Header con Logo
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        Row(
                           children: [
-                            Text(
-                              'SPARK APP',
-                              style: GoogleFonts.inter(
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.white,
-                                letterSpacing: -0.5,
+                            Hero(
+                              tag: 'app_logo',
+                              child: Image.asset(
+                                'public/images/SPARK-LOGO.png',
+                                height: 42,
+                                filterQuality: FilterQuality.high,
                               ),
                             ),
-                            Text(
-                              'By Sheldon & Valentina',
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
-                                color: Colors.white.withValues(alpha: 0.4),
-                              ),
+                            const SizedBox(width: 12),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'SPARK APP',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.white,
+                                    letterSpacing: -0.5,
+                                  ),
+                                ),
+                                Text(
+                                  'By Sheldon & Valentina',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    color: Colors.white.withValues(alpha: 0.4),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -659,12 +672,30 @@ class _BotMainScreenState extends State<BotMainScreen> {
                 Text(
                   isActive
                       ? 'El bot está escaneando órdenes en tiempo real. Toca para pausar.'
-                      : 'El bot escaneará y aceptará órdenes que coincidan con tus criterios con un comportamiento humano.',
+                      : 'Abre el cuadro flotante y pulsa Activar. Seguirá revisando la pantalla hasta tomar una oferta que coincida.',
                   style: GoogleFonts.inter(
                       fontSize: 13,
                       color: Colors.white.withValues(alpha: 0.7),
                       height: 1.4),
                 ),
+                if (filters.orderTypes.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      'Tipo de orden: ${filters.orderTypes.join(" · ")}',
+                      style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: isActive ? Colors.white : AppColors.secondaryCian,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
