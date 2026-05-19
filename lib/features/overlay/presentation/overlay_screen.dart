@@ -17,8 +17,8 @@ class OverlayScreen extends StatefulWidget {
 
 class _OverlayScreenState extends State<OverlayScreen> {
   bool _isExpanded = false;
-  bool _isBotActive = false;
   bool _isValidating = false;
+  Completer<bool>? _accessibilityCompleter;
   StreamSubscription? _overlaySubscription;
   final FilterService _filterService = FilterService();
 
@@ -28,14 +28,33 @@ class _OverlayScreenState extends State<OverlayScreen> {
     _isExpanded = false;
     _loadInitialFilters();
 
-    _overlaySubscription = FlutterOverlayWindow.overlayListener.listen((event) {
+    _overlaySubscription = _filterService.overlayEvents.listen((event) {
       debugPrint("Overlay recibió evento: $event");
       if (event == 'reset_overlay_state') {
         if (mounted) setState(() => _isExpanded = false);
       } else if (event == 'refresh_filters') {
         _handleFiltersRefresh();
+      } else if (event == 'bot_activated' || event == 'bot_deactivated') {
+        // Cuando recibimos confirmación del Isolate principal, detenemos la carga
+        if (mounted) setState(() => _isValidating = false);
+      } else if (event is Map && event['type'] == 'accessibility_result') {
+        _accessibilityCompleter?.complete(event['enabled'] == true);
       }
     });
+  }
+
+  Future<bool> _proxyIsServiceEnabled() async {
+    _accessibilityCompleter = Completer<bool>();
+    await FlutterOverlayWindow.shareData('request_accessibility_check');
+    // Timeout de 2 segundos por seguridad
+    return _accessibilityCompleter!.future.timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => false,
+    );
+  }
+
+  Future<void> _proxyOpenSettings() async {
+    await FlutterOverlayWindow.shareData('request_open_settings');
   }
 
   Future<void> _handleFiltersRefresh() async {
@@ -44,7 +63,7 @@ class _OverlayScreenState extends State<OverlayScreen> {
     await _loadInitialFilters();
     
     // Si el bot está activo, re-sincronizamos con el motor nativo con los nuevos valores
-    if (_isBotActive) {
+    if (_filterService.isBotActiveNotifier.value) {
       await _filterService.syncWithNative(true);
     }
   }
@@ -91,34 +110,55 @@ class _OverlayScreenState extends State<OverlayScreen> {
         behavior: HitTestBehavior.opaque,
         onTap: () async {
           await _loadInitialFilters();
+          // CRÍTICO: Redimensionar ANTES de mostrar el panel para evitar overflow
+          await FlutterOverlayWindow.resizeOverlay(320, 560, true);
           if (mounted) {
             setState(() => _isExpanded = true);
-            await FlutterOverlayWindow.resizeOverlay(320, 560, true);
           }
         },
-        child: Container(
-          width: 70, height: 70,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF0A1629), Color(0xFF020E21)],
-            ),
-            shape: BoxShape.circle,
-            border: Border.all(color: AppColors.primarySpark, width: 2.5),
-            boxShadow: [
-              BoxShadow(color: AppColors.primarySpark.withValues(alpha: 0.25), blurRadius: 15),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(4.0),
-            child: ClipOval(
-              child: Image.asset(
-                'public/images/SPARK-LOGO.png',
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) =>
-                  const Icon(Icons.smart_toy, color: AppColors.primarySpark, size: 30),
+        child: ValueListenableBuilder<bool>(
+          valueListenable: _filterService.isBotActiveNotifier,
+          builder: (context, isActive, _) {
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 400),
+              width: 70, height: 70,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isActive 
+                      ? [AppColors.primarySpark, const Color(0xFF0043AA)]
+                      : [const Color(0xFF0A1629), const Color(0xFF020E21)],
+                ),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isActive ? Colors.white : AppColors.primarySpark, 
+                  width: isActive ? 3.5 : 2.5
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: (isActive ? AppColors.primarySpark : Colors.black)
+                        .withValues(alpha: isActive ? 0.6 : 0.25), 
+                    blurRadius: isActive ? 20 : 15,
+                    spreadRadius: isActive ? 2 : 0
+                  ),
+                ],
               ),
-            ),
-          ),
+              child: Padding(
+                padding: const EdgeInsets.all(4.0),
+                child: ClipOval(
+                  child: Image.asset(
+                    'public/images/SPARK-LOGO.png',
+                    fit: BoxFit.cover,
+                    color: isActive ? Colors.white : null,
+                    colorBlendMode: isActive ? BlendMode.srcIn : null,
+                    errorBuilder: (context, error, stackTrace) =>
+                      Icon(isActive ? Icons.bolt : Icons.smart_toy, 
+                        color: isActive ? Colors.white : AppColors.primarySpark, 
+                        size: 30),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -151,8 +191,11 @@ class _OverlayScreenState extends State<OverlayScreen> {
                 IconButton(
                   icon: const Icon(Icons.close, color: Colors.white38),
                   onPressed: () async {
-                    setState(() => _isExpanded = false);
+                    // Redimensionar ANTES de colapsar para evitar overflow transitorio
                     await FlutterOverlayWindow.resizeOverlay(80, 80, true);
+                    if (mounted) {
+                      setState(() => _isExpanded = false);
+                    }
                   },
                 ),
               ],
@@ -184,11 +227,16 @@ class _OverlayScreenState extends State<OverlayScreen> {
             if (_isValidating)
               const CircularProgressIndicator(color: AppColors.primarySpark)
             else
-              _buildActionButton(
-                label: _isBotActive ? 'DETENER BOT' : 'ACTIVAR BOT',
-                isPrimary: !_isBotActive,
-                isDanger: _isBotActive,
-                onTap: _handleBotToggle,
+              ValueListenableBuilder<bool>(
+                valueListenable: _filterService.isBotActiveNotifier,
+                builder: (context, isActive, _) {
+                  return _buildActionButton(
+                    label: isActive ? 'DETENER BOT' : 'ACTIVAR BOT',
+                    isPrimary: !isActive,
+                    isDanger: isActive,
+                    onTap: () => _handleBotToggle(isActive),
+                  );
+                },
               ),
             
             const SizedBox(height: 12),
@@ -226,32 +274,20 @@ class _OverlayScreenState extends State<OverlayScreen> {
     );
   }
 
-  Future<void> _handleBotToggle() async {
-    if (!_isBotActive) {
-      setState(() => _isValidating = true);
-      
-      bool isEnabled = await AccessibilityUtil.isServiceEnabled();
-      if (!isEnabled) {
-        setState(() => _isValidating = false);
-        await AccessibilityUtil.openSettings();
-        return;
-      }
-      
-      bool isValid = await _filterService.isSessionValid();
-      if (!isValid) {
-        setState(() => _isValidating = false);
-        return;
-      }
-      
-      await _loadInitialFilters();
+  Future<void> _handleBotToggle(bool currentState) async {
+    final bool newState = !currentState;
+    
+    if (mounted) setState(() => _isValidating = true);
+
+    try {
+      // El toggleBot de FilterService ahora detecta si está en el Overlay
+      // y delega la ejecución real (incluyendo validaciones) al Isolate Principal.
+      // Esperamos el evento 'bot_activated' o 'bot_deactivated' para quitar el spinner.
+      await _filterService.toggleBot(newState);
+    } catch (e) {
+      debugPrint("Overlay: Error al solicitar toggle del bot: $e");
+      if (mounted) setState(() => _isValidating = false);
     }
-
-    setState(() {
-      _isBotActive = !_isBotActive;
-      _isValidating = false;
-    });
-
-    await _filterService.syncWithNative(_isBotActive);
   }
 
   Widget _buildCriteriaRow(String label, String value) {

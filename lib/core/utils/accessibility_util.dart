@@ -6,19 +6,37 @@ class AccessibilityUtil {
   static bool _isListening = false;
 
   static Function(String)? _onNativeLog;
+  static Function(String)? _globalLogHandler;
 
-  /// Inicia la escucha de logs nativos
-  static void initNativeLogger([Function(String)? onLog]) {
-    _onNativeLog = onLog;
+  /// Inicia la escucha de logs nativos. 
+  /// [onLog] es un listener temporal (normalmente para UI).
+  /// [isGlobal] define si este listener debe persistir como el logger base.
+  static void initNativeLogger(Function(String) onLog, {bool isGlobal = false}) {
+    if (isGlobal) {
+      _globalLogHandler = onLog;
+    } else {
+      _onNativeLog = onLog;
+    }
+
     if (_isListening) return;
     _isListening = true;
+    
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'nativeLog') {
         final message = call.arguments.toString();
-        debugPrint("🤖 KOTLIN MOTOR: $message");
+        
+        // 1. Ejecutar el handler global (si existe)
+        _globalLogHandler?.call(message);
+        
+        // 2. Ejecutar el handler temporal (si existe)
         _onNativeLog?.call(message);
       }
     });
+  }
+
+  /// Limpia el listener temporal de logs
+  static void clearNativeLogger() {
+    _onNativeLog = null;
   }
 
   /// Verifica si el servicio de accesibilidad está activado

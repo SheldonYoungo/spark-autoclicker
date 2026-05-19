@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:spark_autoclicker/core/theme/app_theme.dart';
+import 'package:spark_autoclicker/core/utils/accessibility_util.dart';
 import 'package:spark_autoclicker/features/admin/presentation/login_screen.dart';
 import 'package:spark_autoclicker/features/admin/presentation/admin_dashboard.dart';
 import 'package:spark_autoclicker/features/automation/presentation/bot_main_screen.dart';
@@ -17,16 +18,26 @@ void main() async {
   SemanticsBinding.instance.ensureSemantics(); // FUERZA a Flutter a crear el árbol de accesibilidad
   await dotenv.load(fileName: ".env");
 
+  // MARCADO DE ISOLATE PRINCIPAL: Crítico para que el FilterService sepa que puede usar MethodChannels
+  FilterService.isMainIsolate = true;
+
+  // Inicializar escucha de logs nativos globalmente
+  AccessibilityUtil.initNativeLogger((log) {
+    debugPrint("📱 [LOG NATIVO] $log");
+  }, isGlobal: true);
+
   try {
-    await Firebase.initializeApp(
-      options: FirebaseOptions(
-        apiKey: dotenv.get('FIREBASE_API_KEY'),
-        appId: '1:1071477543888:android:55e638848d82137060965c',
-        messagingSenderId: '1071477543888',
-        projectId: dotenv.get('FIREBASE_PROJECT_ID'),
-        databaseURL: dotenv.get('FIREBASE_DATABASE_URL'),
-      ),
-    );
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: FirebaseOptions(
+          apiKey: dotenv.get('FIREBASE_API_KEY'),
+          appId: '1:1071477543888:android:55e638848d82137060965c',
+          messagingSenderId: '1071477543888',
+          projectId: dotenv.get('FIREBASE_PROJECT_ID'),
+          databaseURL: dotenv.get('FIREBASE_DATABASE_URL'),
+        ),
+      );
+    }
     // Cargar estado inicial de activación de hardware y filtros
     await ActivationService().init();
     await FilterService().loadFilters();
@@ -41,6 +52,14 @@ void main() async {
 @pragma("vm:entry-point")
 void overlayMain() {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // En el Overlay, isMainIsolate permanece en false (por defecto)
+  
+  // El Overlay corre en su propio proceso/isolate, necesita su propio logger
+  AccessibilityUtil.initNativeLogger((log) {
+    debugPrint("☁️ [OVERLAY NATIVO] $log");
+  }, isGlobal: true);
+
   runApp(
     const MaterialApp(
       debugShowCheckedModeBanner: false,

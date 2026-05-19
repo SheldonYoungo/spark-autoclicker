@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -17,11 +18,34 @@ class BotMainScreen extends StatefulWidget {
 
 class _BotMainScreenState extends State<BotMainScreen> {
   final FilterService _filterService = FilterService();
+  StreamSubscription? _overlaySubscription;
 
   @override
   void initState() {
     super.initState();
     _filterService.loadFilters();
+
+    // Escuchar eventos del Overlay para sincronizar estado en tiempo real
+    _overlaySubscription = _filterService.overlayEvents.listen((event) {
+      debugPrint("BotMainScreen: Evento recibido del stream -> $event");
+      if (event == 'refresh_filters') {
+        _filterService.loadFilters(forceReload: true);
+      }
+    });
+
+    // Log diagnóstico: verificar que el notifier cambia cuando el Overlay hace toggle
+    _filterService.isBotActiveNotifier.addListener(_onBotActiveChanged);
+  }
+
+  void _onBotActiveChanged() {
+    debugPrint("BotMainScreen: ⚡ isBotActiveNotifier CAMBIÓ -> ${_filterService.isBotActiveNotifier.value}");
+  }
+
+  @override
+  void dispose() {
+    _filterService.isBotActiveNotifier.removeListener(_onBotActiveChanged);
+    _overlaySubscription?.cancel();
+    super.dispose();
   }
 
   void _showStoreModal(String? currentVal) {
@@ -34,6 +58,10 @@ class _BotMainScreenState extends State<BotMainScreen> {
         controller: controller,
         autofocus: true,
         keyboardType: TextInputType.number,
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(6),
+        ],
         style: const TextStyle(
             color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
         textAlign: TextAlign.center,
@@ -46,7 +74,7 @@ class _BotMainScreenState extends State<BotMainScreen> {
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
               borderSide: BorderSide.none),
-          hintText: '0000',
+          hintText: '000000',
           hintStyle: const TextStyle(color: Colors.white24),
         ),
       ),
@@ -90,8 +118,8 @@ class _BotMainScreenState extends State<BotMainScreen> {
               Slider(
                 value: tempVal,
                 min: 1,
-                max: 50,
-                divisions: 49,
+                max: 100,
+                divisions: 99,
                 activeColor: AppColors.secondaryCian,
                 inactiveColor: Colors.white10,
                 onChanged: (val) => setModalState(() => tempVal = val),
@@ -102,7 +130,7 @@ class _BotMainScreenState extends State<BotMainScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('1 mi', style: TextStyle(color: Colors.white24)),
-                    Text('50 mi', style: TextStyle(color: Colors.white24)),
+                    Text('100 mi', style: TextStyle(color: Colors.white24)),
                   ],
                 ),
               ),
@@ -114,7 +142,7 @@ class _BotMainScreenState extends State<BotMainScreen> {
   }
 
   void _showPayModal(double currentVal) {
-    double tempVal = currentVal < 20 ? 20 : currentVal;
+    double tempVal = currentVal < 13 ? 13 : currentVal;
     final TextEditingController controller =
         TextEditingController(text: tempVal.toStringAsFixed(0));
 
@@ -131,10 +159,11 @@ class _BotMainScreenState extends State<BotMainScreen> {
                 bottom: MediaQuery.of(context).viewInsets.bottom),
             child: _StyledModalContainer(
               title: 'Tarifa Mínima',
-              subtitle: 'Tarifa mínima aceptable por orden (Mín. \$20)',
+              subtitle: 'Tarifa mínima aceptable por orden (Rango: \$13 - \$150)',
               onSave: () {
                 double? p = double.tryParse(controller.text);
-                if (p == null || p < 20) p = 20;
+                if (p == null || p < 13) p = 13;
+                if (p > 150) p = 150;
 
                 _filterService.saveFilters(
                     _filterService.filtersNotifier.value.copyWith(minPay: p));
@@ -148,35 +177,36 @@ class _BotMainScreenState extends State<BotMainScreen> {
                     children: [
                       _buildStepperButton(
                         icon: Icons.remove,
-                        onPressed: tempVal <= 20
+                        onPressed: tempVal <= 13
                             ? null
                             : () {
                                 setModalState(() {
-                                  tempVal--;
-                                  controller.text = tempVal.toStringAsFixed(0);
+                                  tempVal -= 0.5;
+                                  if (tempVal < 13) tempVal = 13;
+                                  controller.text = tempVal.toStringAsFixed(2);
                                 });
                               },
                       ),
                       const SizedBox(width: 16),
                       SizedBox(
-                        width: 140,
+                        width: 160,
                         child: TextField(
                           controller: controller,
                           autofocus: true,
-                          keyboardType: TextInputType.number,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                            _MinPayInputFormatter(min: 20),
+                            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                            _MinPayInputFormatter(min: 13, max: 150),
                           ],
                           style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 48,
+                              fontSize: 40,
                               fontWeight: FontWeight.bold),
                           textAlign: TextAlign.center,
                           decoration: const InputDecoration(
                             prefixText: '\$',
                             prefixStyle: TextStyle(
-                                color: AppColors.primarySpark, fontSize: 32),
+                                color: AppColors.primarySpark, fontSize: 28),
                             border: InputBorder.none,
                             contentPadding: EdgeInsets.zero,
                           ),
@@ -193,19 +223,22 @@ class _BotMainScreenState extends State<BotMainScreen> {
                       const SizedBox(width: 16),
                       _buildStepperButton(
                         icon: Icons.add,
-                        onPressed: () {
-                          setModalState(() {
-                            tempVal++;
-                            controller.text = tempVal.toStringAsFixed(0);
-                          });
-                        },
+                        onPressed: tempVal >= 150
+                            ? null
+                            : () {
+                                setModalState(() {
+                                  tempVal += 0.5;
+                                  if (tempVal > 150) tempVal = 150;
+                                  controller.text = tempVal.toStringAsFixed(2);
+                                });
+                              },
                       ),
                     ],
                   ),
                   const SizedBox(height: 24),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [20, 25, 30, 40]
+                    children: [13, 25, 50, 100]
                         .map((val) => ActionChip(
                               label: Text('\$$val'),
                               labelStyle: const TextStyle(
@@ -267,7 +300,7 @@ class _BotMainScreenState extends State<BotMainScreen> {
 
   void _showOrderTypeModal(List<String> currentTypes) {
     List<String> tempTypes = List.from(currentTypes);
-    final options = ['Compras', 'Recolección', 'Multiviajes'];
+    final options = ['compras', 'recolección', 'multiviajes'];
 
     showModalBottomSheet(
       context: context,
@@ -278,7 +311,7 @@ class _BotMainScreenState extends State<BotMainScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => _StyledModalContainer(
           title: 'Tipos de Orden',
-          subtitle: 'Selecciona las categorías que deseas recibir',
+          subtitle: 'Selecciona los textos exactos que el bot debe buscar',
           onSave: () {
             _filterService.saveFilters(_filterService.filtersNotifier.value
                 .copyWith(orderTypes: tempTypes));
@@ -294,7 +327,7 @@ class _BotMainScreenState extends State<BotMainScreen> {
                 children: options.map((opt) {
                   final isSelected = tempTypes.contains(opt);
                   return FilterChip(
-                    label: Text(opt),
+                    label: Text(opt.toUpperCase()),
                     selected: isSelected,
                     onSelected: (val) {
                       setModalState(() {
@@ -536,76 +569,107 @@ class _BotMainScreenState extends State<BotMainScreen> {
   }
 
   Widget _buildHeroCard(BotFilters filters) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            const Color(0xFF0043AA).withValues(alpha: 0.8),
-            AppColors.background,
-          ],
-        ),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: AppColors.borderBlue, width: 2.0),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF0043AA).withValues(alpha: 0.3),
-            blurRadius: 25,
-            offset: const Offset(0, 10),
-          )
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.primarySpark.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
+    return ValueListenableBuilder<bool>(
+      valueListenable: _filterService.isBotActiveNotifier,
+      builder: (context, isActive, _) {
+        return GestureDetector(
+          onTap: () => _filterService.toggleBot(!isActive),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isActive
+                    ? [
+                        AppColors.primarySpark.withValues(alpha: 0.8),
+                        const Color(0xFF0043AA),
+                      ]
+                    : [
+                        const Color(0xFF0043AA).withValues(alpha: 0.8),
+                        AppColors.background,
+                      ],
+              ),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                color: isActive ? AppColors.primarySpark : AppColors.borderBlue,
+                width: 2.0,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: (isActive ? AppColors.primarySpark : const Color(0xFF0043AA))
+                      .withValues(alpha: 0.3),
+                  blurRadius: 25,
+                  offset: const Offset(0, 10),
+                )
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Icon(Icons.bolt,
-                        color: AppColors.primarySpark, size: 16),
-                    const SizedBox(width: 4),
-                    Text(
-                      'INIBOT ACTIVO',
-                      style: GoogleFonts.inter(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.primarySpark),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: (isActive ? Colors.white : AppColors.primarySpark)
+                            .withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isActive ? Icons.pause : Icons.play_arrow,
+                            color: isActive ? Colors.white : AppColors.primarySpark,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            isActive ? 'DETENER BOT' : 'ACTIVAR BOT',
+                            style: GoogleFonts.inter(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                color: isActive
+                                    ? Colors.white
+                                    : AppColors.primarySpark),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      isActive ? Icons.bolt : Icons.power_settings_new,
+                      color: isActive ? AppColors.primarySpark : Colors.white24,
                     ),
                   ],
                 ),
-              ),
-              const Icon(Icons.more_horiz, color: Colors.white24),
-            ],
+                const SizedBox(height: 20),
+                Text(
+                  isActive
+                      ? 'Motor de Búsqueda Activo'
+                      : 'Auto-Aceptación de Alta Velocidad',
+                  style: GoogleFonts.inter(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.white),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  isActive
+                      ? 'El bot está escaneando órdenes en tiempo real. Toca para pausar.'
+                      : 'El bot escaneará y aceptará órdenes que coincidan con tus criterios con un comportamiento humano.',
+                  style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: Colors.white.withValues(alpha: 0.7),
+                      height: 1.4),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 20),
-          Text(
-            'Auto-Aceptación de Alta Velocidad',
-            style: GoogleFonts.inter(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: AppColors.white),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'El bot escaneará y aceptará órdenes que coincidan con tus criterios con un comportamiento humano.',
-            style: GoogleFonts.inter(
-                fontSize: 13,
-                color: Colors.white.withValues(alpha: 0.7),
-                height: 1.4),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -650,7 +714,7 @@ class _BotMainScreenState extends State<BotMainScreen> {
           Switch(
             value: true,
             onChanged: (v) {},
-            activeColor: AppColors.secondaryCian,
+            activeThumbColor: AppColors.secondaryCian,
             activeTrackColor: AppColors.secondaryCian.withValues(alpha: 0.2),
           ),
         ],
@@ -661,19 +725,16 @@ class _BotMainScreenState extends State<BotMainScreen> {
 
 class _MinPayInputFormatter extends TextInputFormatter {
   final int min;
+  final int max;
 
-  _MinPayInputFormatter({required this.min});
+  _MinPayInputFormatter({required this.min, required this.max});
 
   @override
   TextEditingValue formatEditUpdate(
       TextEditingValue oldValue, TextEditingValue newValue) {
-    // Permitir vacío temporalmente para facilitar el borrado total y re-escritura
     if (newValue.text.isEmpty) return newValue;
-
-    // Bloquear '0' inicial si es el único carácter (Regla 1)
     if (newValue.text == '0') return oldValue;
 
-    // Eliminar ceros a la izquierda para evitar "025" -> "25"
     String text = newValue.text;
     if (text.startsWith('0') && text.length > 1) {
       text = text.replaceFirst(RegExp(r'^0+'), '');
@@ -682,15 +743,14 @@ class _MinPayInputFormatter extends TextInputFormatter {
     final int? val = int.tryParse(text);
     if (val == null) return oldValue;
 
-    // Si el valor resultante es < 20, forzarlo a "20" inmediatamente (Regla 2)
-    if (val < min) {
+    // Solo forzamos el máximo inmediatamente para no impedir la escritura del mínimo
+    if (val > max) {
       return TextEditingValue(
-        text: min.toString(),
-        selection: TextSelection.collapsed(offset: min.toString().length),
+        text: max.toString(),
+        selection: TextSelection.collapsed(offset: max.toString().length),
       );
     }
 
-    // Si se limpiaron ceros a la izquierda, devolver el texto corregido
     if (text != newValue.text) {
       return TextEditingValue(
         text: text,

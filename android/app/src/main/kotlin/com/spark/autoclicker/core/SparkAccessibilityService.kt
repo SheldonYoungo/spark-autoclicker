@@ -9,6 +9,7 @@ import android.util.Log
 import kotlin.random.Random
 import android.os.Handler
 import android.os.Looper
+import android.graphics.Rect
 
 class SparkAccessibilityService : AccessibilityService() {
 
@@ -17,204 +18,194 @@ class SparkAccessibilityService : AccessibilityService() {
         var instance: SparkAccessibilityService? = null
     }
 
-    // Configuración del bot
     private var isBotActive = false
     private var minPrice = 0.0
     private var maxDistance = 99.9
     private var storeId = ""
-    private var orderType = ""
+    private var orderType = "" 
+    
+    private var lastClickTime = 0L
+    private val clickDebounce = 500L
 
     private fun logToFlutter(message: String) {
         Log.d(TAG, message)
         Handler(Looper.getMainLooper()).post {
             try {
-                com.spark.autoclicker.MainActivity.methodChannel?.invokeMethod("nativeLog", message)
+                // Usamos el plugin para enviar a todos los motores activos
+                SparkNativePlugin.sendLogToAll(message)
             } catch (e: Exception) {
-                // Ignore
+                Log.e(TAG, "Error enviando log: ${e.message}")
             }
         }
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        logToFlutter("Service Connected")
         instance = this
+        logToFlutter("✅ Servicio de Accesibilidad Vinculado")
     }
 
-    /**
-     * Actualiza la configuración del bot desde Flutter
-     */
     fun updateConfig(active: Boolean, price: Double, distance: Double, store: String, type: String) {
         isBotActive = active
         minPrice = price
         maxDistance = distance
         storeId = store
         orderType = type
-        logToFlutter("Config actualizada: Active=$isBotActive, MinPrice=$minPrice, Store=$storeId")
+        
+        val statusText = if (active) "ON" else "OFF"
+        logToFlutter("🤖 Motor Nativo: Estado cambiado a $statusText")
+        logToFlutter("⚙️ Configuración: MinPrice=$price, Distance=$distance, Store=$store, Type=$type")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (!isBotActive) return
 
         val packageName = event.packageName?.toString() ?: return
-        // Permitimos walmart, spark y nuestro propio paquete para el Sandbox
+        
         if (packageName.contains("walmart", ignoreCase = true) || 
             packageName.contains("spark", ignoreCase = true) ||
             packageName == "com.spark.autoclicker") {
+            
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - lastClickTime < clickDebounce) return
+
             val rootNode = rootInActiveWindow ?: return
             scanForOffers(rootNode)
+            rootNode.recycle()
         }
     }
 
-    private fun scanForOffers(node: AccessibilityNodeInfo) {
-        if (!isBotActive) return
+    private fun scanForOffers(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null || !isBotActive) return false
 
-        // Buscamos patrones en el texto de los nodos
         val text = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
         
-        if (text.isNotEmpty()) {
-            // Log para debug (solo en sandbox o con prefijo Monto/Distancia para no saturar)
-            if (text.contains("Monto") || text.contains("miles") || text.contains("#")) {
-                logToFlutter("Analizando nodo: $text")
-            }
-
-            // 1. Extraer Monto ($)
-            val priceRegex = Regex("""\$(\d+\.?\d*)""")
+        if (text.isNotBlank()) {
+            val priceRegex = Regex("""\$(\d+[\.,]?\d*)""")
             val priceMatch = priceRegex.find(text)
-            val currentPrice = priceMatch?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+            
+            if (priceMatch != null) {
+                val currentPrice = priceMatch.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 0.0
 
-            // 2. Extraer Distancia (miles)
-            val distanceRegex = Regex("""(\d+\.?\d*)\s*miles""")
-            val distanceMatch = distanceRegex.find(text)
-            val currentDistance = distanceMatch?.groupValues?.get(1)?.toDoubleOrNull() ?: 99.0
+                val distanceRegex = Regex("""(\d+[\.,]?\d*)\s*miles""")
+                val currentDistance = distanceRegex.find(text)?.groupValues?.get(1)?.replace(",", ".")?.toDoubleOrNull() ?: 999.0
 
-            // 3. Extraer Tienda (#)
-            val storeRegex = Regex("""#(\d+)""")
-            val storeMatch = storeRegex.find(text)
-            val currentStore = storeMatch?.groupValues?.get(1) ?: ""
+                val storeRegex = Regex("""#(\d+)""")
+                val currentStore = storeRegex.find(text)?.groupValues?.get(1) ?: ""
 
-            if (currentPrice > 0) {
-                logToFlutter("Lectura: \$$currentPrice | $currentDistance mi | Store: #${if(currentStore.isEmpty()) "???" else currentStore}")
-            }
-
-            // Lógica de Decisión:
-            // Si detectamos un monto y este supera nuestro mínimo...
-            if (currentPrice >= minPrice && currentPrice > 0) {
-                // ...y la distancia es aceptable
-                if (currentDistance <= maxDistance) {
-                    // ...y si hay filtro de tienda, que coincida
+                if (currentPrice >= minPrice && currentPrice > 0 && currentDistance <= maxDistance) {
                     if (storeId.isEmpty() || storeId == currentStore) {
-                        logToFlutter("¡CRITERIOS CUMPLIDOS! Evaluando clic...")
                         
-                        // Buscamos el botón de aceptar en la ventana actual
-                        val acceptButtons = findNodesByText("Accept")
-                        var targetNode: AccessibilityNodeInfo? = if (acceptButtons.isNotEmpty()) acceptButtons[0] else null
+                        val isTypeMatch = if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) {
+                            true
+                        } else {
+                            val keywords = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                            keywords.isEmpty() || keywords.any { text.contains(it, ignoreCase = true) }
+                        }
 
-                        // Fallback: Búsqueda manual si la búsqueda nativa falla (típico en Flutter)
-                        if (targetNode == null) {
-                            logToFlutter("Búsqueda nativa falló, intentando búsqueda manual profunda...")
-                            rootInActiveWindow?.let { root ->
-                                targetNode = findNodeByTextManually(root, "Accept")
+                        if (isTypeMatch) {
+                            logToFlutter("🎯 Match detectado: \$$currentPrice | $currentDistance mi | Store: #$currentStore")
+                            if (findAndClickAccept()) {
+                                return true 
                             }
                         }
-
-                        if (targetNode != null) {
-                            val rect = android.graphics.Rect()
-                            targetNode!!.getBoundsInScreen(rect)
-                            
-                            logToFlutter("BOTÓN ENCONTRADO en (${rect.centerX()}, ${rect.centerY()}). Ejecutando clic...")
-                            clickAt(rect.centerX().toFloat(), rect.centerY().toFloat())
-                        } else {
-                            logToFlutter("Error: Botón 'Accept' no detectado. Volcando nodos...")
-                            rootInActiveWindow?.let { dumpAllNodes(it) }
-                        }
-                    } else {
-                        logToFlutter("Descartado: Store $currentStore != $storeId")
                     }
-                } else {
-                    logToFlutter("Descartado: Distancia $currentDistance > $maxDistance")
                 }
             }
         }
 
-        // Continuar búsqueda en hijos
         for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            scanForOffers(child)
-            child.recycle()
+            val child = node.getChild(i)
+            if (child != null) {
+                val found = scanForOffers(child)
+                child.recycle()
+                if (found) return true
+            }
         }
+        
+        return false
+    }
+
+    private fun findAndClickAccept(): Boolean {
+        val rootNode = rootInActiveWindow ?: return false
+        
+        val targetTexts = listOf("Accept", "ACCEPT", "Accept offer", "Confirm")
+        
+        for (targetText in targetTexts) {
+            val buttonNode = findNodeByTextManually(rootNode, targetText)
+            if (buttonNode != null) {
+                val rect = Rect()
+                buttonNode.getBoundsInScreen(rect)
+                
+                logToFlutter("🔍 Botón '$targetText' localizado en [${rect.centerX()}, ${rect.centerY()}]")
+                
+                lastClickTime = System.currentTimeMillis()
+                clickAt(rect.centerX().toFloat(), rect.centerY().toFloat())
+                
+                buttonNode.recycle()
+                rootNode.recycle()
+                return true
+            }
+        }
+
+        logToFlutter("⚠️ Oferta compatible vista pero botón 'Accept' no detectado en pantalla")
+        rootNode.recycle()
+        return false
+    }
+
+    private fun findNodeByTextManually(node: AccessibilityNodeInfo?, target: String): AccessibilityNodeInfo? {
+        if (node == null) return null
+        
+        val text = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
+        if (text.contains(target, ignoreCase = true)) {
+            return AccessibilityNodeInfo.obtain(node)
+        }
+        
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i)
+            if (child != null) {
+                val found = findNodeByTextManually(child, target)
+                child.recycle()
+                if (found != null) return found
+            }
+        }
+        return null
+    }
+
+    fun clickAt(x: Float, y: Float) {
+        if (!isBotActive) {
+            logToFlutter("🚫 Intento de clic ignorado: Bot inactivo")
+            return
+        }
+
+        val jitterX = x + Random.nextInt(-3, 3).toFloat()
+        val jitterY = y + Random.nextInt(-3, 3).toFloat()
+        
+        logToFlutter("🖱️ Ejecutando clic en ($jitterX, $jitterY)...")
+
+        val path = Path()
+        path.moveTo(jitterX, jitterY)
+        val gestureBuilder = GestureDescription.Builder()
+        gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, 45)) 
+        
+        dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                logToFlutter("⚡ Gesto completado con éxito")
+            }
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                logToFlutter("❌ Gesto CANCELADO por el sistema")
+            }
+        }, null)
     }
 
     override fun onInterrupt() {
-        logToFlutter("Service Interrupted")
+        logToFlutter("🛑 Servicio interrumpido")
         instance = null
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        logToFlutter("Service Destroyed")
+        logToFlutter("💀 Servicio destruido")
         instance = null
-    }
-
-    fun clickAt(x: Float, y: Float) {
-        if (!isBotActive) return
-
-        // Anti-ban: Añadimos un pequeño jitter aleatorio a las coordenadas (+/- 8 píxeles)
-        val jitterX = x + Random.nextInt(-8, 8).toFloat()
-        val jitterY = y + Random.nextInt(-8, 8).toFloat()
-
-        // Anti-ban: Añadimos un delay aleatorio para simular tiempo de reacción humana (150ms a 450ms)
-        val humanDelay = Random.nextLong(150, 450)
-
-        Handler(Looper.getMainLooper()).postDelayed({
-            val path = Path()
-            path.moveTo(jitterX, jitterY)
-            val builder = GestureDescription.Builder()
-            builder.addStroke(GestureDescription.StrokeDescription(path, 0, 80))
-            
-            try {
-                dispatchGesture(builder.build(), object : GestureResultCallback() {
-                    override fun onCompleted(gestureDescription: GestureDescription?) {
-                        super.onCompleted(gestureDescription)
-                        logToFlutter("Clic ejecutado en ($jitterX, $jitterY) tras ${humanDelay}ms")
-                    }
-                }, null)
-            } catch (e: Exception) {
-                logToFlutter("Error al ejecutar gesto: ${e.message}")
-            }
-        }, humanDelay)
-    }
-
-    fun findNodesByText(text: String): List<AccessibilityNodeInfo> {
-        val rootNode = rootInActiveWindow ?: return emptyList()
-        return rootNode.findAccessibilityNodeInfosByText(text)
-    }
-
-    private fun findNodeByTextManually(node: AccessibilityNodeInfo, targetText: String): AccessibilityNodeInfo? {
-        val text = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
-        if (text.contains(targetText, ignoreCase = true)) {
-            return node
-        }
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            val found = findNodeByTextManually(child, targetText)
-            if (found != null) {
-                return found
-            }
-            child.recycle()
-        }
-        return null
-    }
-
-    private fun dumpAllNodes(node: AccessibilityNodeInfo) {
-        val text = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
-        if (text.isNotEmpty()) {
-            logToFlutter("Nodo visible: [$text] - clickable: ${node.isClickable}")
-        }
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            dumpAllNodes(child)
-            child.recycle()
-        }
     }
 }

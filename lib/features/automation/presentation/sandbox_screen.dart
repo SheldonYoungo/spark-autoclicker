@@ -23,7 +23,8 @@ class _SandboxScreenState extends State<SandboxScreen> {
     AccessibilityUtil.initNativeLogger((log) {
       if (mounted) {
         setState(() {
-          _logs.add("[${DateTime.now().toString().split(' ')[1].split('.')[0]}] $log");
+          _logs.add(
+              "[${DateTime.now().toString().split(' ')[1].split('.')[0]}] $log");
           if (_logs.length > 50) _logs.removeAt(0);
         });
         // Auto-scroll al final
@@ -50,17 +51,84 @@ class _SandboxScreenState extends State<SandboxScreen> {
   void dispose() {
     _timer?.cancel();
     _scrollController.dispose();
+    AccessibilityUtil.clearNativeLogger(); // Limpiar el listener temporal
     super.dispose();
   }
 
-  String _currentOfferText = 'Monto: \$45.50\nDistancia: 2.1 miles\nStore #7178';
+  String _currentOfferText =
+      'Monto: \$20.00\nDistancia: 10 miles\nStore #7178\nCompras';
 
-  void _updateOffer(String price, String distance, String store) {
+  void _updateOffer(String price, String distance, String store,
+      {String type = "Compras"}) {
     setState(() {
-      _currentOfferText = 'Monto: \$$price\nDistancia: $distance miles\nStore #$store';
+      _currentOfferText =
+          'Monto: \$$price\nDistancia: $distance miles\nStore #$store\n$type';
       _isPressed = false;
-      _logs.add(">>> OFERTA CAMBIADA: \$$price, $distance mi, #$store");
+      _logs.add(">>> OFERTA CAMBIADA: \$$price, $distance mi, #$store, $type");
     });
+    // Disparar escaneo al cambiar oferta
+    _scanScreen();
+  }
+
+  double _minPrice = 0.0;
+  double _maxDistance = 99.0;
+  String _storeId = "";
+  String _orderType = "";
+
+  void _scanScreen() {
+    // 1. Extraer Monto con soporte decimal
+    final priceRegex = RegExp(r'\$(\d+\.?\d*)');
+    final priceMatch = priceRegex.firstMatch(_currentOfferText);
+    final double currentPrice =
+        double.tryParse(priceMatch?.group(1) ?? '0.0') ?? 0.0;
+
+    // 2. Extraer Distancia
+    final distRegex = RegExp(r'(\d+\.?\d*)\s*miles');
+    final distMatch = distRegex.firstMatch(_currentOfferText);
+    final double currentDistance =
+        double.tryParse(distMatch?.group(1) ?? '99.0') ?? 99.0;
+
+    // 3. Extraer Tienda
+    final storeRegex = RegExp(r'#(\d+)');
+    final storeMatch = storeRegex.firstMatch(_currentOfferText);
+    final String currentStore = storeMatch?.group(1) ?? "";
+
+    setState(() {
+      _logs.add(
+          "LECTURA: \$$currentPrice | $currentDistance mi | Tienda: #$currentStore");
+    });
+
+    // Lógica de decisión simétrica a Kotlin (BÚSQUEDA LITERAL)
+    bool match = true;
+    if (currentPrice < _minPrice) {
+      match = false;
+      _logs.add("RECHAZADO: Precio \$$currentPrice < \$$_minPrice");
+    }
+    if (currentDistance > _maxDistance) {
+      match = false;
+      _logs.add("RECHAZADO: Distancia $currentDistance > $_maxDistance");
+    }
+    if (_storeId.isNotEmpty && _storeId != currentStore) {
+      match = false;
+      _logs.add("RECHAZADO: Tienda #$currentStore != #$_storeId");
+    }
+
+    // BÚSQUEDA LITERAL DE KEYWORDS (Sin suposiciones)
+    if (_orderType != "Any" && _orderType.isNotEmpty) {
+      final filterKeywords = _orderType.split(',');
+      final hasMatch =
+          filterKeywords.any((keyword) => _currentOfferText.contains(keyword));
+
+      if (!hasMatch) {
+        match = false;
+        _logs.add(
+            "RECHAZADO: Ninguna palabra clave [$filterKeywords] encontrada en el texto.");
+      }
+    }
+
+    if (match && currentPrice > 0) {
+      _logs.add("✅ ¡CRITERIOS CUMPLIDOS! Evaluando clic...");
+    }
   }
 
   @override
@@ -68,7 +136,8 @@ class _SandboxScreenState extends State<SandboxScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Motor Sandbox (Pruebas)', style: TextStyle(color: Colors.white)),
+        title: const Text('Motor Sandbox (Pruebas)',
+            style: TextStyle(color: Colors.white)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
@@ -115,12 +184,14 @@ class _SandboxScreenState extends State<SandboxScreen> {
                       Text(
                         _currentOfferText,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.white, fontSize: 20, height: 1.5),
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 20, height: 1.5),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Heartbeat (Actividad): $_heartbeat', 
-                        style: const TextStyle(color: Colors.white24, fontSize: 10),
+                        'Heartbeat (Actividad): $_heartbeat',
+                        style: const TextStyle(
+                            color: Colors.white24, fontSize: 10),
                       ),
                       const SizedBox(height: 24),
                       Wrap(
@@ -128,10 +199,21 @@ class _SandboxScreenState extends State<SandboxScreen> {
                         runSpacing: 8,
                         alignment: WrapAlignment.center,
                         children: [
-                          _offerButton('Buena', '45.50', '2.1', '7178', Colors.green),
-                          _offerButton('Barata', '12.00', '1.5', '7178', Colors.orange),
-                          _offerButton('Lejos', '50.00', '12.5', '7178', Colors.red),
-                          _offerButton('Otra Tienda', '40.00', '2.0', '9999', Colors.purple),
+                          _offerButton(
+                              'Buena', '45.50', '2.1', '7178', Colors.green,
+                              type: "Compras"),
+                          _offerButton('Recolección', '25.00', '1.5', '7178',
+                              Colors.blue,
+                              type: "Recolección"),
+                          _offerButton(
+                              'Multiviaje', '35.00', '4.2', '7178', Colors.cyan,
+                              type: "Multiviajes"),
+                          _offerButton(
+                              'Barata', '12.00', '1.5', '7178', Colors.orange,
+                              type: "Compras"),
+                          _offerButton(
+                              'Lejos', '50.00', '12.5', '7178', Colors.red,
+                              type: "Compras"),
                         ],
                       ),
                       const SizedBox(height: 32),
@@ -139,33 +221,44 @@ class _SandboxScreenState extends State<SandboxScreen> {
                         width: double.infinity,
                         child: ElevatedButton(
                           onPressed: () async {
-                            bool isEnabled = await AccessibilityUtil.isServiceEnabled();
+                            bool isEnabled =
+                                await AccessibilityUtil.isServiceEnabled();
                             if (!isEnabled) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Activa el servicio en Ajustes')),
+                                const SnackBar(
+                                    content:
+                                        Text('Activa el servicio en Ajustes')),
                               );
                               await AccessibilityUtil.openSettings();
                               return;
                             }
-                            
+
                             await AccessibilityUtil.updateBotConfiguration(
                               isActive: true,
-                              minPrice: 20.0,
-                              maxDistance: 5.0,
+                              minPrice: 13.50,
+                              maxDistance: 5.5,
                               storeId: "7178",
-                              orderType: "Compras",
+                              orderType: "Compras,Recolección",
                             );
-                            
+
                             setState(() {
-                              _logs.add(">>> CONFIGURACIÓN: >\$20.0, <5mi, Tienda #7178");
+                              _minPrice = 13.50;
+                              _maxDistance = 5.5;
+                              _storeId = "7178";
+                              _orderType = "Compras,Recolección";
+                              _logs.add(
+                                  ">>> CONFIGURACIÓN APLICADA: >\$13.50, <5.5mi, Tienda #7178, [Compras,Recolección]");
                             });
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.borderBlue,
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
                           ),
-                          child: const Text('1. APLICAR FILTROS (Min \$20, Max 5mi)', style: TextStyle(fontWeight: FontWeight.bold)),
+                          child: const Text(
+                              '1. APLICAR FILTROS (Muestra Decimal)',
+                              style: TextStyle(fontWeight: FontWeight.bold)),
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -174,15 +267,21 @@ class _SandboxScreenState extends State<SandboxScreen> {
                         child: ElevatedButton(
                           onPressed: () {
                             setState(() => _isPressed = true);
-                            _logs.add(">>> EVENTO: Botón presionado físicamente");
+                            _logs.add(
+                                ">>> EVENTO: Botón presionado físicamente");
                           },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: _isPressed ? Colors.green : AppColors.primarySpark,
+                            backgroundColor: _isPressed
+                                ? Colors.green
+                                : AppColors.primarySpark,
                             foregroundColor: Colors.black,
                             padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
                           ),
-                          child: const Text('Accept', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                          child: const Text('Accept',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 18)),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -232,13 +331,15 @@ class _SandboxScreenState extends State<SandboxScreen> {
     );
   }
 
-  Widget _offerButton(String label, String p, String d, String s, Color color) {
+  Widget _offerButton(String label, String p, String d, String s, Color color,
+      {String type = "Compras"}) {
     return ActionChip(
-      label: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+      label: Text(label,
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
       backgroundColor: color.withValues(alpha: 0.15),
       side: BorderSide(color: color.withValues(alpha: 0.5)),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      onPressed: () => _updateOffer(p, d, s),
+      onPressed: () => _updateOffer(p, d, s, type: type),
     );
   }
 }
