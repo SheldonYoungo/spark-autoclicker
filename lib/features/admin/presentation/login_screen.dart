@@ -17,8 +17,8 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final AuthService _authService = AuthService();
   final ActivationService _activationService = ActivationService();
-  final List<TextEditingController> _pinControllers = List.generate(4, (_) => TextEditingController());
-  final List<FocusNode> _pinFocusNodes = List.generate(4, (_) => FocusNode());
+  final TextEditingController _pinController = TextEditingController();
+  final FocusNode _pinFocusNode = FocusNode();
   
   String _deviceId = 'Obteniendo ID...';
   bool _isLoading = false;
@@ -35,12 +35,8 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _timer?.cancel();
-    for (var c in _pinControllers) {
-      c.dispose();
-    }
-    for (var f in _pinFocusNodes) {
-      f.dispose();
-    }
+    _pinController.dispose();
+    _pinFocusNode.dispose();
     super.dispose();
   }
 
@@ -72,7 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // --- LÓGICA DE ACTIVACIÓN DIRECTA (PARA CHOFERES) ---
   Future<void> _handleActivation() async {
-    final String key = _pinControllers.map((c) => c.text).join();
+    final String key = _pinController.text;
     if (key.length < 4) return;
 
     if (mounted) {
@@ -96,10 +92,8 @@ class _LoginScreenState extends State<LoginScreen> {
         _errorMessage = error;
       });
       // Limpiar PIN
-      for (var c in _pinControllers) {
-        c.clear();
-      }
-      _pinFocusNodes[0].requestFocus();
+      _pinController.clear();
+      _pinFocusNode.requestFocus();
     }
   }
 
@@ -312,46 +306,75 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     const SizedBox(height: 24),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: List.generate(4, (index) {
-                        return Container(
-                          width: 60,
-                          height: 70,
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white24),
+                    SizedBox(
+                      height: 70,
+                      child: Stack(
+                        children: [
+                          // 1. Interfaz visual (Fondo)
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: List.generate(4, (index) {
+                              final String char = _pinController.text.length > index 
+                                  ? _pinController.text[index] 
+                                  : "";
+                              final bool isFocused = _pinController.text.length == index;
+                              
+                              return Container(
+                                width: 60,
+                                height: 70,
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: isFocused ? AppColors.primarySpark : Colors.white24,
+                                    width: isFocused ? 2 : 1,
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    char,
+                                    style: GoogleFonts.jetBrainsMono(
+                                      color: AppColors.primarySpark,
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }),
                           ),
-                          child: Center(
+                          // 2. TextField Transparente (Frente - Captura de input)
+                          Positioned.fill(
                             child: TextField(
-                              controller: _pinControllers[index],
-                              focusNode: _pinFocusNodes[index],
-                              textAlign: TextAlign.center,
+                              controller: _pinController,
+                              focusNode: _pinFocusNode,
                               keyboardType: TextInputType.number,
-                              maxLength: 1,
-                              style: GoogleFonts.jetBrainsMono(
-                                color: AppColors.primarySpark,
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
+                              maxLength: 4,
+                              autofocus: true,
+                              cursorColor: Colors.transparent,
+                              showCursor: false,
+                              enableInteractiveSelection: false,
+                              style: const TextStyle(
+                                color: Colors.transparent, 
+                                fontSize: 28, // Mantener tamaño para el área de toque
+                                letterSpacing: 50, // Espaciado para que no se amontone
                               ),
-                              decoration: const InputDecoration(counterText: '', border: InputBorder.none),
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               onChanged: (value) {
-                                if (value.isNotEmpty && index < 3) {
-                                  _pinFocusNodes[index + 1].requestFocus();
-                                } else if (value.isEmpty && index > 0) {
-                                  _pinFocusNodes[index - 1].requestFocus();
-                                }
-                                
-                                final currentKey = _pinControllers.map((c) => c.text).join();
-                                if (currentKey.length == 4) {
+                                setState(() {});
+                                if (value.length == 4) {
                                   _handleActivation();
                                 }
                               },
+                              decoration: const InputDecoration(
+                                border: InputBorder.none,
+                                counterText: "",
+                                contentPadding: EdgeInsets.zero,
+                              ),
                             ),
                           ),
-                        );
-                      }),
+                        ],
+                      ),
                     ),
 
                     if (_errorMessage != null) ...[
