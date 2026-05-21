@@ -50,6 +50,17 @@ class AccessibilityUtil {
     }
   }
 
+  /// Consulta el estado actual de activación del bot en el motor nativo
+  static Future<bool> getBotStatus() async {
+    try {
+      final bool? status = await _channel.invokeMethod('getBotStatus');
+      return status ?? false;
+    } catch (e) {
+      debugPrint("Error consultando estado del bot: $e");
+      return false;
+    }
+  }
+
   /// Abre la pantalla de configuración de accesibilidad de Android
   static Future<void> openSettings() async {
     try {
@@ -66,6 +77,7 @@ class AccessibilityUtil {
     required double maxDistance,
     required String storeId,
     required String orderType,
+    required int scanSpeed,
   }) async {
     try {
       await _channel.invokeMethod('updateBotConfiguration', {
@@ -74,8 +86,9 @@ class AccessibilityUtil {
         'maxDistance': maxDistance,
         'storeId': storeId,
         'orderType': orderType,
+        'scanSpeed': scanSpeed,
       });
-      debugPrint("Configuración del bot sincronizada: Active=$isActive, Price=$minPrice");
+      debugPrint("Configuración del bot sincronizada: Active=$isActive, Price=$minPrice, Speed=$scanSpeed");
     } catch (e) {
       debugPrint("Error sincronizando configuración del bot: $e");
     }

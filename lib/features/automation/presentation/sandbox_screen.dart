@@ -240,6 +240,7 @@ class _SandboxScreenState extends State<SandboxScreen> {
                               maxDistance: 5.5,
                               storeId: "7178",
                               orderType: "Compras,Recolección",
+                              scanSpeed: 500,
                             );
 
                             setState(() {

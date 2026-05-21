@@ -26,25 +26,32 @@ class _OverlayScreenState extends State<OverlayScreen> {
     _isExpanded = false;
     _loadInitialFilters();
 
+    // Sincronización reactiva: Actualizar UI y liberar estado de carga cuando cambie el bot status globalmente
+    _filterService.isBotActiveNotifier.addListener(_onBotStatusChanged);
+
     _overlaySubscription = _filterService.overlayEvents.listen((event) {
       debugPrint("Overlay recibió evento: $event");
       if (event == 'reset_overlay_state') {
         if (mounted) setState(() => _isExpanded = false);
       } else if (event == 'refresh_filters') {
         _handleFiltersRefresh();
-      } else if (event == 'bot_activated' || event == 'bot_deactivated') {
-        if (mounted) setState(() => _isValidating = false);
       }
     });
   }
 
+  void _onBotStatusChanged() {
+    if (mounted) {
+      debugPrint("Overlay UI: Detectado cambio de estado global -> Bot ${_filterService.isBotActiveNotifier.value ? 'ON' : 'OFF'}");
+      setState(() {
+        _isValidating = false;
+      });
+    }
+  }
 
   Future<void> _handleFiltersRefresh() async {
     await Future.delayed(const Duration(milliseconds: 150));
     await _loadInitialFilters();
-    if (_filterService.isBotActiveNotifier.value) {
-      await _filterService.syncWithNative(true);
-    }
+    // Nota: El motor nativo ya se auto-sincroniza vía SharedPreferences
   }
 
   Future<void> _loadInitialFilters() async {
@@ -56,6 +63,7 @@ class _OverlayScreenState extends State<OverlayScreen> {
 
   @override
   void dispose() {
+    _filterService.isBotActiveNotifier.removeListener(_onBotStatusChanged);
     _overlaySubscription?.cancel();
     super.dispose();
   }
@@ -96,7 +104,6 @@ class _OverlayScreenState extends State<OverlayScreen> {
         child: ValueListenableBuilder<bool>(
           valueListenable: _filterService.isBotActiveNotifier,
           builder: (context, isActive, _) {
-            // Colores vibrantes para estados, evitando el amarillo "sucio"
             final Color statusColor = isActive 
                 ? const Color(0xFF00FF88) // Verde Neón Vibrante (Active)
                 : const Color(0xFFFF3333); // Rojo Intenso (Inactive)
@@ -106,7 +113,6 @@ class _OverlayScreenState extends State<OverlayScreen> {
               curve: Curves.easeInOut,
               width: 70, height: 70,
               decoration: BoxDecoration(
-                // Fondo oscuro profundo consistente para que el logo y el borde resalten
                 gradient: const LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -225,6 +231,11 @@ class _OverlayScreenState extends State<OverlayScreen> {
   }
 
   Widget _buildCriteriaCard(BotFilters filters, String store, String types) {
+    String speedLabel = 'NORMAL';
+    if (filters.speedMultiplier >= 3.0) speedLabel = 'EXTREMO';
+    else if (filters.speedMultiplier >= 2.0) speedLabel = 'LIEBRE';
+    else if (filters.speedMultiplier >= 1.5) speedLabel = 'SEGURO';
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -241,7 +252,43 @@ class _OverlayScreenState extends State<OverlayScreen> {
           _buildCriteriaRow('Distancia', '< ${filters.maxDistance.toStringAsFixed(1)} mi'),
           const Divider(height: 20, color: Colors.white10),
           _buildCriteriaRow('Categorías', types),
+          const Divider(height: 20, color: Colors.white10),
+          _buildInteractiveCriteriaRow(
+            'Velocidad', 
+            speedLabel, 
+            onTap: () {
+              final tiers = [1.0, 1.5, 2.0, 3.0];
+              int index = tiers.indexOf(filters.speedMultiplier);
+              if (index == -1) index = 1; // Default to Seguro if mismatch
+              double nextVal = tiers[(index + 1) % tiers.length];
+              _filterService.saveFilters(filters.copyWith(speedMultiplier: nextVal));
+            }
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildInteractiveCriteriaRow(String label, String value, {required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: GoogleFonts.inter(fontSize: 12, color: Colors.white70, fontWeight: FontWeight.w600)),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(value.toUpperCase(), style: GoogleFonts.inter(fontSize: 11, color: AppColors.primarySpark, fontWeight: FontWeight.bold), textAlign: TextAlign.right),
+                const SizedBox(width: 4),
+                const Icon(Icons.sync, size: 12, color: AppColors.primarySpark),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

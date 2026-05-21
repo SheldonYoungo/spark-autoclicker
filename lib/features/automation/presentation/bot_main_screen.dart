@@ -17,7 +17,7 @@ class BotMainScreen extends StatefulWidget {
   State<BotMainScreen> createState() => _BotMainScreenState();
 }
 
-class _BotMainScreenState extends State<BotMainScreen> {
+class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserver {
   final FilterService _filterService = FilterService();
   StreamSubscription? _overlaySubscription;
   Timer? _ticker;
@@ -25,12 +25,13 @@ class _BotMainScreenState extends State<BotMainScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _filterService.loadFilters();
 
     // Escuchar eventos del Overlay para sincronizar estado en tiempo real
     _overlaySubscription = _filterService.overlayEvents.listen((event) {
       debugPrint("BotMainScreen: Evento recibido del stream -> $event");
-      if (event == 'refresh_filters') {
+      if (event == 'refresh_filters' || event == 'bot_activated' || event == 'bot_deactivated') {
         _filterService.loadFilters(forceReload: true);
       }
     });
@@ -44,12 +45,22 @@ class _BotMainScreenState extends State<BotMainScreen> {
     });
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      debugPrint("BotMainScreen: App RESUMED -> Forzando sincronización con SharedPreferences");
+      _filterService.loadFilters(forceReload: true);
+    }
+  }
+
   void _onBotActiveChanged() {
     debugPrint("BotMainScreen: ⚡ isBotActiveNotifier CAMBIÓ -> ${_filterService.isBotActiveNotifier.value}");
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _filterService.isBotActiveNotifier.removeListener(_onBotActiveChanged);
     _overlaySubscription?.cancel();
@@ -583,7 +594,7 @@ class _BotMainScreenState extends State<BotMainScreen> {
                     ),
                     const SizedBox(height: 32),
 
-                    _buildSpeedBoostCard(),
+                    _buildSpeedBoostCard(filters),
                     const SizedBox(height: 40),
 
                     SizedBox(
@@ -766,51 +777,123 @@ class _BotMainScreenState extends State<BotMainScreen> {
     );
   }
 
-  Widget _buildSpeedBoostCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0A1629),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppColors.borderBlue.withValues(alpha: 0.3)),
+  void _showSpeedModal(double currentMultiplier) {
+    double tempVal = currentMultiplier;
+    final tiers = [
+      {'val': 1.0, 'label': 'Tortuga', 'desc': 'Escaneo normal (1s)', 'icon': Icons.hourglass_empty},
+      {'val': 1.5, 'label': 'Seguro', 'desc': 'Recomendado (500ms)', 'icon': Icons.check_circle_outline},
+      {'val': 2.0, 'label': 'Liebre', 'desc': 'Muy rápido (300ms)', 'icon': Icons.bolt},
+      {'val': 3.0, 'label': 'Extremo', 'desc': 'IA Máxima (100ms)', 'icon': Icons.whatshot},
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => _StyledModalContainer(
+          title: 'Velocidad de Escaneo',
+          subtitle: 'Ajusta qué tan rápido el bot revisa la pantalla',
+          onSave: () {
+            _filterService.saveFilters(_filterService.filtersNotifier.value
+                .copyWith(speedMultiplier: tempVal));
+            Navigator.pop(context);
+          },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: tiers.map((tier) {
+              final isSelected = tempVal == tier['val'];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: InkWell(
+                  onTap: () => setModalState(() => tempVal = tier['val'] as double),
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      color: isSelected ? AppColors.secondaryCian.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.03),
+                      border: Border.all(
+                        color: isSelected ? AppColors.secondaryCian : Colors.white.withValues(alpha: 0.05),
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(tier['icon'] as IconData, color: isSelected ? AppColors.secondaryCian : Colors.white38),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(tier['label'] as String, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                              Text(tier['desc'] as String, style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                        if (isSelected) const Icon(Icons.check_circle, color: AppColors.secondaryCian),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.secondaryCian.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(16),
+    );
+  }
+
+  Widget _buildSpeedBoostCard(BotFilters filters) {
+    String label = 'Normal';
+    if (filters.speedMultiplier >= 3.0) label = 'Extremo';
+    else if (filters.speedMultiplier >= 2.0) label = 'Liebre';
+    else if (filters.speedMultiplier >= 1.5) label = 'Seguro';
+
+    return GestureDetector(
+      onTap: () => _showSpeedModal(filters.speedMultiplier),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0A1629),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: AppColors.borderBlue.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.secondaryCian.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.speed, color: AppColors.secondaryCian),
             ),
-            child: const Icon(Icons.speed, color: AppColors.secondaryCian),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Impulso de Velocidad IA',
-                  style: GoogleFonts.inter(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.white),
-                ),
-                Text(
-                  'Frecuencia: 1.5x (Seguro)',
-                  style: GoogleFonts.inter(
-                      fontSize: 12, color: AppColors.secondaryCian),
-                ),
-              ],
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Impulso de Velocidad IA',
+                    style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.white),
+                  ),
+                  Text(
+                    'Frecuencia: ${filters.speedMultiplier}x ($label)',
+                    style: GoogleFonts.inter(
+                        fontSize: 12, color: AppColors.secondaryCian),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Switch(
-            value: true,
-            onChanged: (v) {},
-            activeThumbColor: AppColors.secondaryCian,
-            activeTrackColor: AppColors.secondaryCian.withValues(alpha: 0.2),
-          ),
-        ],
+            const Icon(Icons.arrow_forward_ios, color: Colors.white12, size: 16),
+          ],
+        ),
       ),
     );
   }

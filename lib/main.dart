@@ -58,6 +58,7 @@ void overlayMain() {
   // El Overlay corre en su propio proceso/isolate, necesita su propio logger
   AccessibilityUtil.initNativeLogger((log) {
     debugPrint("☁️ [OVERLAY NATIVO] $log");
+    FilterService().processNativeEvent(log);
   }, isGlobal: true);
 
   runApp(

@@ -11,9 +11,14 @@ import io.flutter.plugin.common.MethodChannel.Result
 import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
 
-class SparkNativePlugin : FlutterPlugin, MethodCallHandler {
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import android.app.Activity
+
+class SparkNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private lateinit var channel: MethodChannel
     private var context: Context? = null
+    private var activity: Activity? = null
 
     companion object {
         private const val TAG = "SparkNativePlugin"
@@ -57,6 +62,22 @@ class SparkNativePlugin : FlutterPlugin, MethodCallHandler {
         context = null
     }
 
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        activity = null
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivity() {
+        activity = null
+    }
+
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
             "isServiceEnabled" -> {
@@ -77,13 +98,14 @@ class SparkNativePlugin : FlutterPlugin, MethodCallHandler {
                 val maxDistance = call.argument<Double>("maxDistance") ?: 99.0
                 val storeId = call.argument<String>("storeId") ?: ""
                 val orderType = call.argument<String>("orderType") ?: ""
+                val scanSpeed = call.argument<Int>("scanSpeed") ?: 500
                 
-                Log.d(TAG, "📱 Android recibió orden de activación: $isActive")
+                Log.d(TAG, "📱 Android recibió orden de activación: $isActive | Speed: ${scanSpeed}ms")
                 
                 val service = SparkAccessibilityService.instance
                 if (service != null) {
                     service.updateConfig(
-                        isActive, minPrice, maxDistance, storeId, orderType
+                        isActive, minPrice, maxDistance, storeId, orderType, scanSpeed
                     )
                     result.success(true)
                 } else {
@@ -92,9 +114,18 @@ class SparkNativePlugin : FlutterPlugin, MethodCallHandler {
                 }
             }
             "moveToBackground" -> {
-                // Esta acción requiere una Activity, no se puede hacer desde el plugin fácilmente sin ActivityBinding
-                // Pero podemos delegarla o ignorarla si viene del overlay
-                result.success(true)
+                activity?.let {
+                    it.moveTaskToBack(true)
+                    result.success(true)
+                } ?: result.error("NO_ACTIVITY", "No activity found to move to background", null)
+            }
+            "getBotStatus" -> {
+                val service = SparkAccessibilityService.instance
+                if (service != null) {
+                    result.success(service.isBotActive)
+                } else {
+                    result.success(false)
+                }
             }
             "clickAt" -> {
                 val x = call.argument<Double>("x")?.toFloat() ?: 0f
