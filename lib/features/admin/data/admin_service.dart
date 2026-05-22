@@ -1,9 +1,14 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:math';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../automation/data/activation_service.dart';
 import '../domain/user_model.dart';
+import 'package:flutter/foundation.dart';
 
 class AdminService {
   final FirebaseDatabase _db = FirebaseDatabase.instance;
+  static final ValueNotifier<int> forceReloadNotifier = ValueNotifier(0);
 
   // Obtener flujo de usuarios en tiempo real
   Stream<List<UserModel>> getUsersStream() {
@@ -57,6 +62,62 @@ class AdminService {
     await _db.ref('users/$uid').update({
       'status': status.name,
     });
+  }
+
+  Future<void> addAdminDevice(String uid, String deviceId) async {
+    final snapshot = await _db.ref('users/$uid/authorizedDeviceIds').get();
+    List<String> devices = [];
+    if (snapshot.exists && snapshot.value != null) {
+      final value = snapshot.value;
+      if (value is List) {
+        devices = List<String>.from(value);
+      }
+    }
+    if (!devices.contains(deviceId)) {
+      devices.add(deviceId);
+      await _db.ref('users/$uid/authorizedDeviceIds').set(devices);
+    }
+    
+    // Registrar también en un nodo global de configuración para el bypass sin sesión (Zero Cost)
+    await _db.ref('config/admin_devices/$deviceId').set(true);
+  }
+
+  Future<bool> isCurrentDeviceAdmin() async {
+    try {
+      final auth = FirebaseAuth.instance;
+      final deviceId = await ActivationService().getDeviceId();
+      
+      final prefs = await SharedPreferences.getInstance();
+      final isRevoked = prefs.getBool('bypass_revoked') ?? false;
+      
+      // Chequeo 1: Vía Auth Directo (Si acaba de iniciar sesión con OTP)
+      if (auth.currentUser != null && !auth.currentUser!.isAnonymous) {
+        final uid = auth.currentUser!.uid;
+        final snapshot = await _db.ref('users/$uid/role').get();
+        if (snapshot.exists && snapshot.value?.toString() == 'admin') {
+          return true;
+        }
+      }
+
+      // Chequeo 2: Vía Hardware ID Bypass (Si borró caché o desinstaló, usamos login anónimo y consultamos config)
+      if (isRevoked) {
+        return false; // El usuario cerró sesión explícitamente en este dispositivo
+      }
+
+      if (auth.currentUser == null) {
+        await auth.signInAnonymously();
+      }
+      
+      final deviceSnapshot = await _db.ref('config/admin_devices/$deviceId').get();
+      if (deviceSnapshot.exists && deviceSnapshot.value == true) {
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      debugPrint("isCurrentDeviceAdmin error: $e");
+      return false;
+    }
   }
 
   String generateActivationKey() {

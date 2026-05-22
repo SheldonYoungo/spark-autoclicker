@@ -68,14 +68,19 @@ class UserModel {
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
     return UserModel(
-      id: json['id'],
-      name: json['name'] ?? '',
-      role: UserRole.values.byName(json['role']),
-      status: UserStatus.values.byName(json['status']),
-      expirationDate: DateTime.parse(json['expirationDate']),
-      authorizedDeviceIds: List<String>.from(json['authorizedDeviceIds'] ?? []),
-      maxSlots: json['maxSlots'] ?? 1,
-      activationKey: json['activationKey'],
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      role: UserRole.values.byName(json['role']?.toString() ?? 'driver'),
+      status: UserStatus.values.byName(json['status']?.toString() ?? 'pending'),
+      expirationDate: DateTime.parse(json['expirationDate']?.toString() ?? DateTime.now().toIso8601String()),
+      authorizedDeviceIds: (json['authorizedDeviceIds'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          [],
+      maxSlots: (json['maxSlots'] is int) 
+          ? json['maxSlots'] 
+          : int.tryParse(json['maxSlots']?.toString() ?? '1') ?? 1,
+      activationKey: json['activationKey']?.toString(),
     );
   }
 }

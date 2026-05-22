@@ -3,7 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../automation/data/activation_service.dart';
+import 'package:firebase_database/firebase_database.dart';
 import '../domain/user_model.dart';
 import '../data/admin_service.dart';
 import '../data/auth_service.dart';
@@ -314,7 +317,44 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
           IconButton(
             onPressed: () async {
-              await AuthService().signOut();
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: AppColors.background,
+                  title: const Text('Cerrar Sesión', style: TextStyle(color: Colors.white)),
+                  content: const Text(
+                    'Si cierras sesión, este dispositivo perderá el acceso automático y necesitarás usar un SMS la próxima vez. ¿Deseas continuar?',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('Cancelar'),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Cerrar Sesión', style: TextStyle(color: Colors.white)),
+                    ),
+                  ],
+                ),
+              );
+
+              if (confirm == true) {
+                // Registrar revocación local para que el bypass anónimo falle a propósito
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setBool('bypass_revoked', true);
+
+                final deviceId = await ActivationService().getDeviceId();
+                try {
+                  await FirebaseDatabase.instance.ref('config/admin_devices/$deviceId').remove();
+                } catch (e) {
+                  debugPrint("Error remove bypass: $e");
+                }
+                await AuthService().signOut();
+                AdminService.forceReloadNotifier.value++;
+                if (context.mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+              }
             },
             icon: const Icon(Icons.logout, color: AppColors.primarySpark),
           ),

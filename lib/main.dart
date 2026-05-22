@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:spark_autoclicker/core/theme/app_theme.dart';
 import 'package:spark_autoclicker/core/utils/accessibility_util.dart';
+import 'package:spark_autoclicker/features/admin/data/admin_service.dart';
 import 'package:spark_autoclicker/features/admin/presentation/login_screen.dart';
 import 'package:spark_autoclicker/features/admin/presentation/admin_dashboard.dart';
 import 'package:spark_autoclicker/features/automation/presentation/bot_main_screen.dart';
@@ -96,75 +97,56 @@ class AuthWrapper extends StatefulWidget {
 class _AuthWrapperState extends State<AuthWrapper> {
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<String?>(
-      valueListenable: ActivationService.linkedUidNotifier,
-      builder: (context, linkedUid, _) {
+    return ValueListenableBuilder<int>(
+      valueListenable: AdminService.forceReloadNotifier,
+      builder: (context, _, __) {
         return StreamBuilder<User?>(
           stream: FirebaseAuth.instance.authStateChanges(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const LoadingScreen(message: 'Iniciando...');
-            }
+          builder: (context, authSnapshot) {
+            return FutureBuilder<bool>(
+              future: AdminService().isCurrentDeviceAdmin(),
+              builder: (context, adminSnapshot) {
+                if (adminSnapshot.connectionState == ConnectionState.waiting) {
+                  return const LoadingScreen(message: 'Verificando hardware...');
+                }
 
-            final user = snapshot.data;
-            
-            // 1. Si hay un usuario logueado vía Firebase (ADMIN)
-            if (user != null) {
-              return FutureBuilder<bool>(
-                future: _isUserAdmin(user.uid),
-                builder: (context, adminSnapshot) {
-                  if (adminSnapshot.connectionState == ConnectionState.waiting) {
-                    return const LoadingScreen(message: 'Verificando privilegios...');
-                  }
-                  if (adminSnapshot.data == true) {
-                    return const AdminDashboard();
-                  }
-                  return const LoginScreen();
-                },
-              );
-            }
+                final bool isAdminDevice = adminSnapshot.data ?? false;
 
-            // 2. Si no hay admin, pero el dispositivo está vinculado (CONDUCTOR)
-            if (linkedUid != null) {
-              return StreamBuilder<bool>(
-                stream: ActivationService().authStateStream(linkedUid),
-                builder: (context, deviceSnapshot) {
-                  if (deviceSnapshot.connectionState == ConnectionState.waiting) {
-                    // Solo mostramos loading la primera vez o si no tenemos data previa
-                    if (!deviceSnapshot.hasData) {
-                      return const LoadingScreen(message: 'Validando suscripción...');
+                if (isAdminDevice) {
+                  return const BotMainScreen();
+                }
+
+                return ValueListenableBuilder<String?>(
+                  valueListenable: ActivationService.linkedUidNotifier,
+                  builder: (context, linkedUid, _) {
+                    if (linkedUid != null) {
+                      return StreamBuilder<bool>(
+                        stream: ActivationService().authStateStream(linkedUid),
+                        builder: (context, deviceSnapshot) {
+                          if (deviceSnapshot.connectionState == ConnectionState.waiting) {
+                            if (!deviceSnapshot.hasData) {
+                              return const LoadingScreen(message: 'Validando suscripción...');
+                            }
+                          }
+
+                          if (deviceSnapshot.data == true) {
+                            return const BotMainScreen();
+                          } else {
+                            return const LoginScreen();
+                          }
+                        },
+                      );
                     }
-                  }
 
-                  if (deviceSnapshot.data == true) {
-                    return const BotMainScreen();
-                  } else {
-                    // Si el stream emite false, el servicio ya llamó a clearLocalLink
                     return const LoginScreen();
-                  }
-                },
-              );
-            }
-
-            // 3. Estado por defecto: Login
-            return const LoginScreen();
+                  },
+                );
+              },
+            );
           },
         );
       },
     );
-  }
-
-  Future<bool> _isUserAdmin(String uid) async {
-    try {
-      final snapshot = await FirebaseDatabase.instance.ref('users/$uid/role').get();
-      if (snapshot.exists) {
-        return snapshot.value == 'admin';
-      }
-      return false;
-    } catch (e) {
-      debugPrint("Error verificando rol: $e");
-      return false;
-    }
   }
 }
 

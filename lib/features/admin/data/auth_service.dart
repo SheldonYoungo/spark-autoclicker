@@ -1,7 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../domain/user_model.dart';
 import 'admin_service.dart';
+import '../../automation/data/activation_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -53,6 +55,14 @@ class AuthService {
             name: 'Administrador Principal',
           );
         }
+        
+        // Registrar el Device ID actual en el perfil del Admin
+        final deviceId = await ActivationService().getDeviceId();
+        await _adminService.addAdminDevice(user.uid, deviceId);
+        
+        // Limpiar cualquier revocación local previa
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('bypass_revoked', false);
       }
 
       // 2. Obtener datos del usuario (Sea admin o chofer vinculado)
@@ -78,6 +88,9 @@ class AuthService {
       }
     } catch (e) {
       rethrow;
+    } finally {
+      // Forzar recarga del AuthWrapper para superar la race condition del stream authStateChanges
+      AdminService.forceReloadNotifier.value++;
     }
   }
 

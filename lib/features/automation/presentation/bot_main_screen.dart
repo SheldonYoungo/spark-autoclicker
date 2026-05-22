@@ -9,6 +9,8 @@ import 'package:spark_autoclicker/features/automation/data/activation_service.da
 import '../../../core/utils/overlay_util.dart';
 import '../data/filter_service.dart';
 import '../domain/filter_model.dart';
+import '../../admin/data/admin_service.dart';
+import '../../admin/presentation/admin_dashboard.dart';
 
 class BotMainScreen extends StatefulWidget {
   const BotMainScreen({super.key});
@@ -21,12 +23,14 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
   final FilterService _filterService = FilterService();
   StreamSubscription? _overlaySubscription;
   Timer? _ticker;
+  bool _isAdmin = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _filterService.loadFilters();
+    _checkAdminStatus();
 
     // Escuchar eventos del Overlay para sincronizar estado en tiempo real
     _overlaySubscription = _filterService.overlayEvents.listen((event) {
@@ -50,6 +54,15 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
     if (state == AppLifecycleState.resumed) {
       debugPrint("BotMainScreen: App RESUMED -> Forzando sincronización con SharedPreferences");
       _filterService.loadFilters(forceReload: true);
+    }
+  }
+
+  Future<void> _checkAdminStatus() async {
+    final isAdmin = await AdminService().isCurrentDeviceAdmin();
+    if (mounted) {
+      setState(() {
+        _isAdmin = isAdmin;
+      });
     }
   }
 
@@ -508,6 +521,14 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                         ),
                         Row(
                           children: [
+                            if (_isAdmin)
+                              IconButton(
+                                icon: const Icon(Icons.admin_panel_settings, color: Colors.orangeAccent),
+                                onPressed: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (_) => const AdminDashboard()),
+                                ),
+                              ),
                             IconButton(
                               icon: const Icon(Icons.bug_report_outlined,
                                   color: AppColors.secondaryCian),
