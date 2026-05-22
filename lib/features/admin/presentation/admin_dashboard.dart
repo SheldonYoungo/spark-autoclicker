@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -6,7 +7,6 @@ import '../../../core/theme/app_theme.dart';
 import '../domain/user_model.dart';
 import '../data/admin_service.dart';
 import '../data/auth_service.dart';
-import '../../../core/network/firebase_diagnostics.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -72,6 +72,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final phoneController = TextEditingController();
     final hoursController = TextEditingController();
     int slots = 1;
+    String selectedCode = '+1';
 
     showDialog(
       context: context,
@@ -88,12 +89,46 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(labelText: 'Nombre Completo', labelStyle: TextStyle(color: Colors.white70)),
                 ),
-                TextField(
-                  controller: phoneController,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: const InputDecoration(labelText: 'Teléfono (con +)', labelStyle: TextStyle(color: Colors.white70)),
-                  keyboardType: TextInputType.phone,
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: selectedCode,
+                          dropdownColor: AppColors.background,
+                          style: const TextStyle(color: Colors.white),
+                          items: const [
+                            DropdownMenuItem(value: '+1', child: Text('🇺🇸 +1')),
+                            DropdownMenuItem(value: '+58', child: Text('🇻🇪 +58')),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) {
+                              setDialogState(() => selectedCode = val);
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: phoneController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: const InputDecoration(labelText: 'Teléfono', labelStyle: TextStyle(color: Colors.white70)),
+                        keyboardType: TextInputType.phone,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      ),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 16),
                 TextField(
                   controller: hoursController,
                   style: const TextStyle(color: Colors.white),
@@ -134,8 +169,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.primarySpark),
               onPressed: () async {
                 if (nameController.text.isNotEmpty && phoneController.text.isNotEmpty) {
+                  final fullPhone = '$selectedCode${phoneController.text.trim()}';
                   await _adminService.addDriver(
-                    phone: phoneController.text,
+                    phone: fullPhone,
                     name: nameController.text,
                     customHours: int.tryParse(hoursController.text),
                     maxSlots: slots,
@@ -275,31 +311,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
           IconButton(
             onPressed: _showConfigDialog,
             icon: const Icon(Icons.settings, color: AppColors.white),
-          ),
-          IconButton(
-            onPressed: () async {
-              final report = await FirebaseDiagnostics.checkHealth();
-              if (mounted) {
-                showDialog(
-                  context: this.context,
-                  builder: (context) => AlertDialog(
-                    backgroundColor: AppColors.background,
-                    title: const Text('Diagnóstico Firebase', style: TextStyle(color: Colors.white)),
-                    content: Text(
-                      'Auth: ${report['auth_status']}\n'
-                      'Lectura: ${report['database_read']}\n'
-                      'Escritura: ${report['database_write']}\n'
-                      'Error: ${report['error'] ?? 'Ninguno'}',
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar')),
-                    ],
-                  ),
-                );
-              }
-            },
-            icon: const Icon(Icons.health_and_safety, color: AppColors.secondaryCian),
           ),
           IconButton(
             onPressed: () async {

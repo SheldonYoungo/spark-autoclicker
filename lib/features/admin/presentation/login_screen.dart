@@ -100,54 +100,91 @@ class _LoginScreenState extends State<LoginScreen> {
   // --- LÓGICA DE LOGIN SECRETO (PARA ADMIN) ---
   void _showSecretAdminLogin() {
     final phoneController = TextEditingController();
+    String selectedCode = '+1';
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.background,
-        title: Text('Modo Administrador', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: phoneController,
-              autofocus: true,
-              style: const TextStyle(color: Colors.white),
-              keyboardType: TextInputType.phone,
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9+]'))],
-              decoration: InputDecoration(
-                labelText: 'Número de Teléfono',
-                labelStyle: GoogleFonts.inter(color: Colors.white70),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.background,
+          title: Text('Modo Administrador', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: selectedCode,
+                        dropdownColor: AppColors.background,
+                        style: const TextStyle(color: Colors.white),
+                        items: const [
+                          DropdownMenuItem(value: '+1', child: Text('🇺🇸 +1')),
+                          DropdownMenuItem(value: '+58', child: Text('🇻🇪 +58')),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() => selectedCode = val);
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: phoneController,
+                      autofocus: true,
+                      style: const TextStyle(color: Colors.white),
+                      keyboardType: TextInputType.phone,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: InputDecoration(
+                        labelText: 'Número',
+                        labelStyle: GoogleFonts.inter(color: Colors.white70),
+                      ),
+                    ),
+                  ),
+                ],
               ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primarySpark),
+              onPressed: () async {
+                final phone = phoneController.text.trim();
+                if (phone.isEmpty) return;
+                
+                final fullPhone = '$selectedCode$phone';
+                
+                Navigator.pop(ctx); // Cierra diálogo de teléfono
+                _startTimer();
+                _showLoadingDialog('Enviando SMS...');
+                
+                await _authService.verifyPhone(
+                  phoneNumber: fullPhone,
+                  onCodeSent: (verId) {
+                    _popSafe(); // Quitar loading
+                    if (mounted) _showOtpDialog(verId);
+                  },
+                  onError: (e) {
+                    _popSafe(); // Quitar loading
+                    if (mounted) _showError(e.message ?? 'Error de SMS');
+                  },
+                );
+              },
+              child: const Text('Enviar SMS', style: TextStyle(color: Colors.black)),
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primarySpark),
-            onPressed: () async {
-              final phone = phoneController.text;
-              if (phone.isEmpty) return;
-              
-              Navigator.pop(ctx); // Cierra diálogo de teléfono
-              _startTimer();
-              _showLoadingDialog('Enviando SMS...');
-              
-              await _authService.verifyPhone(
-                phoneNumber: phone,
-                onCodeSent: (verId) {
-                  _popSafe(); // Quitar loading
-                  if (mounted) _showOtpDialog(verId);
-                },
-                onError: (e) {
-                  _popSafe(); // Quitar loading
-                  if (mounted) _showError(e.message ?? 'Error de SMS');
-                },
-              );
-            },
-            child: const Text('Enviar SMS', style: TextStyle(color: Colors.black)),
-          ),
-        ],
       ),
     );
   }
