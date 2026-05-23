@@ -95,12 +95,14 @@ class AdminService {
         final uid = auth.currentUser!.uid;
         final snapshot = await _db.ref('users/$uid/role').get();
         if (snapshot.exists && snapshot.value?.toString() == 'admin') {
+          await prefs.setBool('is_admin_device', true);
           return true;
         }
       }
 
       // Chequeo 2: Vía Hardware ID Bypass (Si borró caché o desinstaló, usamos login anónimo y consultamos config)
       if (isRevoked) {
+        await prefs.setBool('is_admin_device', false);
         return false; // El usuario cerró sesión explícitamente en este dispositivo
       }
 
@@ -110,9 +112,11 @@ class AdminService {
       
       final deviceSnapshot = await _db.ref('config/admin_devices/$deviceId').get();
       if (deviceSnapshot.exists && deviceSnapshot.value == true) {
+        await prefs.setBool('is_admin_device', true);
         return true;
       }
       
+      await prefs.setBool('is_admin_device', false);
       return false;
     } catch (e) {
       debugPrint("isCurrentDeviceAdmin error: $e");

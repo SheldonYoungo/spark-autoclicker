@@ -11,7 +11,10 @@ import '../data/filter_service.dart';
 import '../domain/filter_model.dart';
 import '../../admin/data/admin_service.dart';
 import '../../admin/presentation/admin_dashboard.dart';
-
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 class BotMainScreen extends StatefulWidget {
   const BotMainScreen({super.key});
 
@@ -35,7 +38,7 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
     // Escuchar eventos del Overlay para sincronizar estado en tiempo real
     _overlaySubscription = _filterService.overlayEvents.listen((event) {
       debugPrint("BotMainScreen: Evento recibido del stream -> $event");
-      if (event == 'refresh_filters' || event == 'bot_activated' || event == 'bot_deactivated') {
+      if (event == 'refresh_filters') {
         _filterService.loadFilters(forceReload: true);
       }
     });
@@ -478,8 +481,8 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                             ),
                             const SizedBox(width: 12),
                             Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
                                 Text(
                                   'SPARK APP',
                                   style: GoogleFonts.inter(
@@ -498,18 +501,23 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                                           width: 6,
                                           height: 6,
                                           decoration: BoxDecoration(
-                                            color: _getRemainingColor(expiration),
+                                            color: _isAdmin ? AppColors.secondaryCian : _getRemainingColor(expiration),
                                             shape: BoxShape.circle,
                                           ),
                                         ),
                                         const SizedBox(width: 4),
                                         Text(
-                                          'Suscripción: ${_getRemainingTime(expiration)}',
+                                          _isAdmin 
+                                              ? 'Suscripción: Ilimitada' 
+                                              : 'Suscripción: ${_getRemainingTime(expiration)}',
                                           style: GoogleFonts.inter(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w600,
-                                            color: _getRemainingColor(expiration).withValues(alpha: 0.8),
+                                            color: _isAdmin 
+                                                ? AppColors.secondaryCian 
+                                                : _getRemainingColor(expiration).withValues(alpha: 0.8),
                                           ),
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ],
                                     );
@@ -554,7 +562,19 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                                   )
                                 ) ?? false;
                                 if (confirm) {
-                                  await ActivationService().clearLocalLink();
+                                  if (_isAdmin) {
+                                    final prefs = await SharedPreferences.getInstance();
+                                    await prefs.setBool('bypass_revoked', true);
+                                    await prefs.setBool('is_admin_device', false);
+                                    final deviceId = await ActivationService().getDeviceId();
+                                    try {
+                                      await FirebaseDatabase.instance.ref('config/admin_devices/$deviceId').remove();
+                                    } catch (_) {}
+                                    await FirebaseAuth.instance.signOut();
+                                    AdminService.forceReloadNotifier.value++;
+                                  } else {
+                                    await ActivationService().clearLocalLink();
+                                  }
                                 }
                               },
                             ),
