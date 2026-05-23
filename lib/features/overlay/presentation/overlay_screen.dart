@@ -149,7 +149,7 @@ class _OverlayScreenState extends State<OverlayScreen> {
       key: const ValueKey('panel'),
       child: Container(
         width: 300,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             colors: [Color(0xFF0A1629), Color(0xFF020E21)],
@@ -157,11 +157,12 @@ class _OverlayScreenState extends State<OverlayScreen> {
           borderRadius: BorderRadius.circular(28),
           border: Border.all(color: AppColors.borderBlue.withValues(alpha: 0.8), width: 1.5),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 20),
-              decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(10))),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 36, height: 4, margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(10))),
             
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -225,6 +226,7 @@ class _OverlayScreenState extends State<OverlayScreen> {
               onTap: () => OverlayUtil.closeOverlay(),
             ),
           ],
+        ),
         ),
       ),
     );
