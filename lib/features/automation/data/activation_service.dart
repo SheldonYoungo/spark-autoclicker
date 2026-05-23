@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'dart:io';
 import '../../../core/network/ntp_service.dart';
 import '../../admin/domain/user_model.dart';
+import 'filter_service.dart';
+import '../../../core/utils/overlay_util.dart';
 
 class ActivationService {
   final FirebaseDatabase _db = FirebaseDatabase.instance;
@@ -60,46 +62,69 @@ class ActivationService {
 
   Future<String?> activateKey(String uid, String key) async {
     try {
-      final snapshot = await _db.ref('users/$uid').get();
-      if (!snapshot.exists) return 'Usuario no encontrado.';
-
-      final user = UserModel.fromJson(Map<String, dynamic>.from(snapshot.value as Map));
+      final currentDeviceId = await getDeviceId();
+      final userRef = _db.ref('users/$uid');
       
-      if (user.activationKey != key) {
+      // Primera lectura rápida para validar expiración vía NTP (No soportado de forma asíncrona dentro de la transacción pura de Firebase)
+      final preSnap = await userRef.get();
+      if (!preSnap.exists) return 'Usuario no encontrado.';
+      
+      final preUser = UserModel.fromJson(Map<String, dynamic>.from(preSnap.value as Map));
+      if (preUser.activationKey != key) {
         return 'La llave de activación es incorrecta.';
       }
-
-      if (await _isExpired(user.expirationDate)) {
+      if (await _isExpired(preUser.expirationDate)) {
         return 'Suscripción expirada o error de red (NTP).';
       }
 
-      final currentDeviceId = await getDeviceId();
-      if (user.authorizedDeviceIds.contains(currentDeviceId)) {
-        if (user.status == UserStatus.pending) {
-          await _db.ref('users/$uid').update({'status': UserStatus.active.name});
+      String? errorMsg;
+      UserModel? finalUser;
+
+      final transactionResult = await userRef.runTransaction((Object? postData) {
+        if (postData == null) return Transaction.abort();
+
+        final Map<String, dynamic> data = Map<String, dynamic>.from(postData as Map);
+        final user = UserModel.fromJson(data);
+
+        // Dispositivo ya registrado
+        if (user.authorizedDeviceIds.contains(currentDeviceId)) {
+          if (user.status == UserStatus.pending) {
+            data['status'] = UserStatus.active.name;
+          }
+          finalUser = UserModel.fromJson(data);
+          return Transaction.success(data);
         }
-        await _saveAuthDataLocally(user, uid);
-        showExpiredBanner.value = false;
-        return null;
-      }
 
-      if (!user.hasAvailableSlots) {
-        return 'Has alcanzado el límite de dispositivos (${user.maxSlots}).';
-      }
+        // Límite alcanzado
+        if (!user.hasAvailableSlots) {
+          errorMsg = 'Has alcanzado el límite de dispositivos (${user.maxSlots}).';
+          return Transaction.abort();
+        }
 
-      final updatedDeviceIds = List<String>.from(user.authorizedDeviceIds)..add(currentDeviceId);
-      
-      await _db.ref('users/$uid').update({
-        'authorizedDeviceIds': updatedDeviceIds,
-        'status': UserStatus.active.name,
-        'activationKey': null,
+        // Añadir dispositivo al slot
+        final updatedDeviceIds = List<String>.from(user.authorizedDeviceIds)..add(currentDeviceId);
+        data['authorizedDeviceIds'] = updatedDeviceIds;
+        data['status'] = UserStatus.active.name;
+        
+        // Limpiar llave SOLO si los slots están llenos
+        if (updatedDeviceIds.length >= user.maxSlots) {
+          data['activationKey'] = null;
+        }
+
+        finalUser = UserModel.fromJson(data);
+        return Transaction.success(data);
       });
 
-      await _saveAuthDataLocally(user, uid);
-      showExpiredBanner.value = false;
-      return null;
+      if (transactionResult.committed && finalUser != null) {
+        await _saveAuthDataLocally(finalUser!, uid);
+        showExpiredBanner.value = false;
+        return null; // Éxito
+      } else {
+        return errorMsg ?? 'Error de concurrencia al activar la llave. Intenta de nuevo.';
+      }
     } catch (e) {
-      return 'Error durante la activación: $e';
+      debugPrint("ActivationService: Error en activateKey: $e");
+      return 'Error de conexión con el servidor.';
     }
   }
 
@@ -208,5 +233,16 @@ class ActivationService {
     await prefs.remove(_keyStatus);
     linkedUidNotifier.value = null;
     expirationDateNotifier.value = null;
+    
+    // Kill Switch: Forzar apagado del bot y cierre de overlay
+    try {
+      final filterService = FilterService();
+      if (filterService.isBotActiveNotifier.value) {
+        await filterService.toggleBot(false);
+      }
+      OverlayUtil.closeOverlay();
+    } catch (e) {
+      debugPrint("ActivationService: Error ejecutando Kill Switch: $e");
+    }
   }
 }

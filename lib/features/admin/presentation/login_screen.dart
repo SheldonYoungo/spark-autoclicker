@@ -301,11 +301,15 @@ class _LoginScreenState extends State<LoginScreen> {
         child: SafeArea(
           child: Stack(
             children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32.0),
-                child: Column(
-                  children: [
-                    const Spacer(flex: 2),
+              CustomScrollView(
+                slivers: [
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 32.0),
+                      child: Column(
+                        children: [
+                          const Spacer(flex: 2),
                     
                     // Logo Oficial con Gesto Secreto
                     GestureDetector(
@@ -469,6 +473,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 24),
                   ],
                 ),
+              ),
+                  ),
+                ],
               ),
               
               // Banner de Expiración
