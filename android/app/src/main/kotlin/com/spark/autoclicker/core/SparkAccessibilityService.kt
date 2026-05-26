@@ -13,6 +13,11 @@ import android.graphics.Rect
 import android.content.Context
 import android.content.SharedPreferences
 import org.json.JSONObject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Servicio de Accesibilidad para automatizar la captura de ofertas en Spark.
@@ -23,8 +28,13 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
     companion object {
         private const val TAG = "SparkAccessibility"
-        private const val PREFS_NAME = "FlutterSharedPreferences" // Nombre estándar usado por SharedPreferences plugin
+        private const val PREFS_NAME = "FlutterSharedPreferences"
         var instance: SparkAccessibilityService? = null
+
+        // Regex pre-compilados (se crean UNA sola vez, no en cada nodo)
+        private val PRICE_REGEX = Regex("""\$\s*(\d+[\.,]\d+|\d+)""")
+        private val DISTANCE_REGEX = Regex("""(\d+[\.,]\d+|\d+)\s*(?:mi|mile|miles)""", RegexOption.IGNORE_CASE)
+        private val STORE_REGEX = Regex("""#\s*(\d+)""")
     }
 
     var isBotActive = false
@@ -42,6 +52,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     private var lastScanTime = 0L
 
     private var prefs: SharedPreferences? = null
+    
+    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private fun logToFlutter(message: String) {
         Log.d(TAG, message)
@@ -142,133 +154,201 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             
             val currentTime = System.currentTimeMillis()
             if (currentTime - lastClickTime < clickDebounce) return
-            
             if (currentTime - lastScanTime < scanSpeed) return
             lastScanTime = currentTime
 
-            val rootNode = rootInActiveWindow ?: return
+            val allRoots = mutableListOf<AccessibilityNodeInfo>()
             try {
-                scanForOffers(rootNode)
-            } finally {
-                rootNode.recycle()
-            }
-        }
-    }
+                windows?.forEach { w -> w.root?.let { allRoots.add(it) } }
+            } catch (_: Exception) {}
+            if (allRoots.isEmpty()) rootInActiveWindow?.let { allRoots.add(it) }
+            if (allRoots.isEmpty()) return
 
-    private fun scanForOffers(node: AccessibilityNodeInfo?): Boolean {
-        if (node == null || !isBotActive) return false
-
-        val text = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
-        
-        if (text.isNotBlank()) {
-            val priceRegex = Regex("""\$(\d+[\.,]?\d*)""")
-            val priceMatch = priceRegex.find(text)
-            
-            if (priceMatch != null) {
-                val currentPrice = priceMatch.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 0.0
-                val distanceRegex = Regex("""(\d+[\.,]?\d*)\s*miles""")
-                val currentDistance = distanceRegex.find(text)?.groupValues?.get(1)?.replace(",", ".")?.toDoubleOrNull() ?: 999.0
-                val storeRegex = Regex("""#(\d+)""")
-                val currentStore = storeRegex.find(text)?.groupValues?.get(1) ?: ""
-
-                if (currentPrice >= minPrice && currentPrice > 0 && currentDistance <= maxDistance) {
-                    if (storeId.isEmpty() || storeId == currentStore) {
-                        
-                        val isTypeMatch = if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) {
-                            true
-                        } else {
-                            val keywords = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
-                            keywords.isEmpty() || keywords.any { text.contains(it, ignoreCase = true) }
-                        }
-
-                        if (isTypeMatch) {
-                            logToFlutter("🎯 Match detectado: \$$currentPrice | $currentDistance mi | Store: #$currentStore")
-                            if (findAndClickAccept()) {
-                                return true 
-                            }
-                        }
-                    }
+            serviceScope.launch {
+                try {
+                    processAllWindows(allRoots)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error escaneando: ${e.message}")
+                } finally {
+                    allRoots.forEach { it.recycle() }
                 }
             }
         }
-
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i)
-            if (child != null) {
-                val found = scanForOffers(child)
-                child.recycle()
-                if (found) return true
-            }
-        }
-        
-        return false
     }
 
-    private fun findAndClickAccept(): Boolean {
-        val rootNode = rootInActiveWindow ?: return false
-        val targetTexts = listOf("Accept", "ACCEPT", "Accept offer", "Confirm")
-        
-        try {
-            for (targetText in targetTexts) {
-                val buttonNode = findNodeByTextManually(rootNode, targetText)
-                if (buttonNode != null) {
-                    val rect = Rect()
-                    buttonNode.getBoundsInScreen(rect)
-                    logToFlutter("🔍 Botón '$targetText' localizado")
-                    lastClickTime = System.currentTimeMillis()
+    // ── Resultado de un solo recorrido completo del árbol ──
+    private class ScanResult {
+        var matchFound = false
+        var matchPrice = 0.0
+        var matchDistance = 999.0
+        var matchStore = ""
+        var acceptNode: AccessibilityNodeInfo? = null
+        var acceptRect: Rect? = null
+    }
 
-                    var clicked = false
-                    if (buttonNode.isClickable) {
-                        clicked = buttonNode.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    }
-                    
-                    if (!clicked) {
-                        var parent = buttonNode.parent
-                        while (parent != null) {
-                            if (parent.isClickable && !clicked) {
-                                clicked = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                            }
-                            val nextParent = parent.parent
-                            parent.recycle()
-                            if (clicked) {
-                                nextParent?.recycle()
-                                break
-                            }
-                            parent = nextParent
-                        }
-                    }
+    private val acceptKeywords = listOf(
+        "accept", "aceptar", "confirm", "confirmar", "tomar", "take it"
+    )
 
+    /**
+     * UN SOLO recorrido de TODAS las ventanas que simultáneamente:
+     *   - Evalúa precio/distancia/tienda → detecta match
+     *   - Busca nodo cuyo texto contenga "Accept"/"Aceptar" → guarda referencia
+     * Al final, si hay match Y hay botón → clic.
+     */
+    private suspend fun processAllWindows(allRoots: List<AccessibilityNodeInfo>) {
+        val result = ScanResult()
+
+        for (root in allRoots) {
+            collectNodes(root, result)
+        }
+
+        if (!result.matchFound) return
+
+        logToFlutter("🎯 Match: \$${result.matchPrice} | ${result.matchDistance} mi | #${result.matchStore}")
+
+        // ── Estrategia 1: Nodo "Accept" encontrado durante recorrido manual ──
+        if (result.acceptNode != null) {
+            logToFlutter("🔍 Botón Accept localizado (recorrido manual)")
+            val clicked = clickNode(result.acceptNode!!, result.acceptRect)
+            result.acceptNode!!.recycle()
+            if (clicked) {
+                logToFlutter("✅ ¡Clic ejecutado!")
+                return
+            }
+        }
+
+        // ── Estrategia 2: findAccessibilityNodeInfosByText (apps nativas) ──
+        for (root in allRoots) {
+            for (kw in acceptKeywords) {
+                val nodes = root.findAccessibilityNodeInfosByText(kw)
+                if (nodes.isNotEmpty()) {
+                    logToFlutter("🔍 [API nativa] Botón '$kw' encontrado (${nodes.size})")
+                    val clicked = clickNode(nodes[0], null)
+                    nodes.forEach { it.recycle() }
                     if (clicked) {
-                        logToFlutter("⚡ Clic instantáneo ejecutado")
-                    } else {
-                        clickAt(rect)
+                        logToFlutter("✅ ¡Clic por API nativa!")
+                        return
                     }
-                    
-                    buttonNode.recycle()
-                    return true
                 }
+                nodes.forEach { it.recycle() }
             }
-        } finally {
-            rootNode.recycle()
         }
-        return false
+
+        logToFlutter("❌ Match OK pero no se encontró botón Accept.")
     }
 
-    private fun findNodeByTextManually(node: AccessibilityNodeInfo?, target: String): AccessibilityNodeInfo? {
-        if (node == null) return null
-        val text = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
-        if (text.contains(target, ignoreCase = true)) {
-            return AccessibilityNodeInfo.obtain(node)
+    /**
+     * Recorrido recursivo que recolecta match de precio Y nodo Accept en un solo pase.
+     */
+    private fun collectNodes(node: AccessibilityNodeInfo?, result: ScanResult, depth: Int = 0) {
+        if (node == null || depth > 30) return
+        // Terminación temprana: ya tenemos match + botón, no hay más que buscar
+        if (result.matchFound && result.acceptNode != null) return
+
+        val text = node.text?.toString() ?: ""
+        val cd = node.contentDescription?.toString() ?: ""
+        val combined = text.ifBlank { cd }
+
+        if (combined.isNotBlank()) {
+            // ── Detectar match de precio/distancia (regex pre-compilados) ──
+            if (!result.matchFound) {
+                val priceMatches = PRICE_REGEX.findAll(combined).toList()
+                if (priceMatches.isNotEmpty()) {
+                    val maxPrice = priceMatches.maxOfOrNull {
+                        it.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 0.0
+                    } ?: 0.0
+
+                    val minDist = DISTANCE_REGEX.findAll(combined).toList().let { matches ->
+                        if (matches.isNotEmpty()) matches.minOfOrNull {
+                            it.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 999.0
+                        } ?: 999.0 else 999.0
+                    }
+
+                    val store = STORE_REGEX.find(combined)?.groupValues?.get(1) ?: ""
+
+                    if (maxPrice >= minPrice && maxPrice > 0 && minDist <= maxDistance) {
+                        val storeOk = storeId.isEmpty() || storeId == store
+                        val typeOk = if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) true
+                        else {
+                            val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                            kws.isEmpty() || kws.any { combined.contains(it, ignoreCase = true) }
+                        }
+                        if (storeOk && typeOk) {
+                            result.matchFound = true
+                            result.matchPrice = maxPrice
+                            result.matchDistance = minDist
+                            result.matchStore = store
+                        }
+                    }
+                }
+            }
+
+            // ── Detectar botón Accept/Aceptar (sin .lowercase(), usa containsIgnoreCase) ──
+            if (result.acceptNode == null) {
+                if (acceptKeywords.any { combined.contains(it, ignoreCase = true) }) {
+                    result.acceptNode = AccessibilityNodeInfo.obtain(node)
+                    result.acceptRect = Rect().also { node.getBoundsInScreen(it) }
+                    Log.d(TAG, "🔎 Accept encontrado: '$combined' click=${node.isClickable} rect=${result.acceptRect} d=$depth")
+                }
+            }
         }
+
         for (i in 0 until node.childCount) {
             val child = node.getChild(i)
             if (child != null) {
-                val found = findNodeByTextManually(child, target)
+                collectNodes(child, result, depth + 1)
                 child.recycle()
-                if (found != null) return found
             }
         }
-        return null
+    }
+
+    /**
+     * Ejecuta clic en un nodo con 3 intentos:
+     *   1. ACTION_CLICK directo
+     *   2. ACTION_CLICK en padres clickeables
+     *   3. Gesto (dispatchGesture) en coordenadas del nodo
+     */
+    private suspend fun clickNode(node: AccessibilityNodeInfo, fallbackRect: Rect?): Boolean {
+        return withContext(Dispatchers.Main) {
+            lastClickTime = System.currentTimeMillis()
+
+            // Intento 1: clic directo
+            if (node.isClickable) {
+                if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    logToFlutter("⚡ ACTION_CLICK directo OK")
+                    return@withContext true
+                }
+            }
+
+            // Intento 2: escalar a padres
+            var parent = node.parent
+            var d = 0
+            while (parent != null && d < 10) {
+                if (parent.isClickable) {
+                    val ok = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    parent.recycle()
+                    if (ok) {
+                        logToFlutter("⚡ ACTION_CLICK padre (d=$d) OK")
+                        return@withContext true
+                    }
+                }
+                val next = parent.parent
+                parent.recycle()
+                parent = next
+                d++
+            }
+            parent?.recycle()
+
+            // Intento 3: gesto en coordenadas
+            val rect = fallbackRect ?: Rect().also { node.getBoundsInScreen(it) }
+            if (!rect.isEmpty) {
+                logToFlutter("🎯 Gesto en coordenadas: $rect")
+                clickAt(rect)
+                return@withContext true
+            }
+            false
+        }
     }
 
     fun clickAt(x: Float, y: Float) {

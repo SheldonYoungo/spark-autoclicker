@@ -164,6 +164,11 @@ class FilterService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_storageKey, jsonEncode(newFilters.toJson()));
       
+      // Guardar explicitamente como double para el motor nativo
+      // Garantizando su uso como rango: precio >= minPay y distancia <= maxDistance
+      await prefs.setDouble('minPay', newFilters.minPay);
+      await prefs.setDouble('maxDistance', newFilters.maxDistance);
+      
       // Notificar a otros isolates
       await _sendToOtherIsolate({'type': 'refresh_filters'});
     } catch (e) {

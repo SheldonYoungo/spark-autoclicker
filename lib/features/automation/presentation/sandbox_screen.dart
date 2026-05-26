@@ -266,24 +266,28 @@ class _SandboxScreenState extends State<SandboxScreen> {
                       const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: () {
-                            setState(() => _isPressed = true);
-                            _logs.add(
-                                ">>> EVENTO: Botón presionado físicamente");
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isPressed
-                                ? Colors.green
-                                : AppColors.primarySpark,
-                            foregroundColor: Colors.black,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
+                        child: Semantics(
+                          label: 'Accept',
+                          button: true,
+                          child: ElevatedButton(
+                            onPressed: () {
+                              setState(() => _isPressed = true);
+                              _logs.add(
+                                  ">>> EVENTO: Botón presionado físicamente");
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _isPressed
+                                  ? Colors.green
+                                  : AppColors.primarySpark,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: const Text('Accept',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 18)),
                           ),
-                          child: const Text('Accept',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 18)),
                         ),
                       ),
                       const SizedBox(height: 8),
