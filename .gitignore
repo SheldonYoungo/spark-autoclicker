@@ -80,3 +80,6 @@ docs/
 .agents/
 
 .antigravitycli/
+
+*.jpeg
+*.txt

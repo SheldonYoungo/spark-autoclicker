@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
@@ -19,6 +20,13 @@ class _OverlayScreenState extends State<OverlayScreen> {
   bool _isValidating = false;
   StreamSubscription? _overlaySubscription;
   final FilterService _filterService = FilterService();
+  OverlayPosition? _originalPosition;
+  bool _wasOnLeftSide = false;
+
+  // Dimensiones del panel y burbuja (en dp)
+  static const int _panelWidth = 320;
+  static const int _panelHeight = 560;
+  static const int _collapsedSize = 80;
 
   @override
   void initState() {
@@ -68,6 +76,17 @@ class _OverlayScreenState extends State<OverlayScreen> {
     super.dispose();
   }
 
+  /// Obtiene el ancho real de la pantalla en dp usando el Display del sistema.
+  /// Fallback: estima desde la posición del imán.
+  double _getScreenWidthDp() {
+    try {
+      final display = ui.PlatformDispatcher.instance.displays.first;
+      return display.size.width / display.devicePixelRatio;
+    } catch (_) {
+      return (_originalPosition?.x ?? 280) + _collapsedSize;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Material(
@@ -96,7 +115,41 @@ class _OverlayScreenState extends State<OverlayScreen> {
         behavior: HitTestBehavior.opaque,
         onTap: () async {
           await _loadInitialFilters();
-          await FlutterOverlayWindow.resizeOverlay(320, 560, true);
+          
+          try {
+            _originalPosition = await FlutterOverlayWindow.getOverlayPosition();
+          } catch (e) {
+            debugPrint("OverlayPosition get falló: $e");
+          }
+
+          // RIGHT gravity: x ≈ 0 = borde derecho, x >> 0 = borde izquierdo.
+          // Umbral de 50dp distingue lados de forma segura (el imán solo deja x=0 o x=screenW-bubble).
+          _wasOnLeftSide = _originalPosition != null && _originalPosition!.x > 50;
+
+          // FIX: El plugin nativo dispara una animación (TrayAnimationTimerTask) al soltar el toque (ACTION_UP).
+          // Si redimensionamos inmediatamente, el timer usa el nuevo ancho pero con destino viejo,
+          // lo que termina jalando el panel hacia el lado izquierdo y desbordándolo.
+          // Esperar 200ms asegura que el timer nativo termine/se cancele antes de mover la ventana.
+          await Future.delayed(const Duration(milliseconds: 200));
+
+          // FIX: Deshabilitar el drag (false) para el panel grande.
+          // Arrastrar un panel de 560px hacia los bordes dispara un bucle infinito (temblor) en MIUI.
+          await FlutterOverlayWindow.resizeOverlay(_panelWidth, _panelHeight, false);
+
+          // Centramos el panel SIEMPRE en la pantalla (X e Y) para evitar colisiones con los bordes
+          if (_originalPosition != null) {
+            try {
+              final screenW = _getScreenWidthDp();
+              final centerX = ((screenW - _panelWidth) / 2).round().clamp(0, 999);
+              // Gravity.CENTER hace que y=0 sea el centro vertical absoluto
+              await FlutterOverlayWindow.moveOverlay(
+                OverlayPosition(centerX.toDouble(), 0),
+              );
+            } catch (e) {
+              debugPrint("moveOverlay centrar panel falló: $e");
+            }
+          }
+
           if (mounted) {
             setState(() => _isExpanded = true);
           }
@@ -167,14 +220,34 @@ class _OverlayScreenState extends State<OverlayScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('SPARK BOT', style: GoogleFonts.orbitron(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.white)),
+                Flexible(
+                  child: Text('SPARK BOT', style: GoogleFonts.orbitron(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.white), overflow: TextOverflow.ellipsis),
+                ),
                 IconButton(
                   icon: const Icon(Icons.close, color: Colors.white38),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                   onPressed: () async {
-                    await FlutterOverlayWindow.resizeOverlay(80, 80, true);
-                    if (mounted) {
-                      setState(() => _isExpanded = false);
+                    if (mounted) setState(() => _isExpanded = false);
+                    await Future.delayed(const Duration(milliseconds: 50));
+                    // Rehabilitar drag para la burbuja
+                    await FlutterOverlayWindow.resizeOverlay(_collapsedSize, _collapsedSize, true);
+                    
+                    // Restaurar burbuja a su posición original (X e Y)
+                    if (_originalPosition != null) {
+                      try {
+                        final screenW = _getScreenWidthDp();
+                        // LEFT edge = screenW - bubble. RIGHT edge = 0
+                        final destX = _wasOnLeftSide ? (screenW - _collapsedSize).round() : 0;
+                        await FlutterOverlayWindow.moveOverlay(
+                          OverlayPosition(destX.toDouble(), _originalPosition!.y),
+                        );
+                      } catch (e) {
+                        debugPrint("Error restaurando posición: $e");
+                      }
                     }
+                    _originalPosition = null;
+                    _wasOnLeftSide = false;
                   },
                 ),
               ],
@@ -281,13 +354,16 @@ class _OverlayScreenState extends State<OverlayScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(label, style: GoogleFonts.inter(fontSize: 12, color: Colors.white70, fontWeight: FontWeight.w600)),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(value.toUpperCase(), style: GoogleFonts.inter(fontSize: 11, color: AppColors.primarySpark, fontWeight: FontWeight.bold), textAlign: TextAlign.right),
-                const SizedBox(width: 4),
-                const Icon(Icons.sync, size: 12, color: AppColors.primarySpark),
-              ],
+            const SizedBox(width: 8),
+            Flexible(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(child: Text(value.toUpperCase(), style: GoogleFonts.inter(fontSize: 11, color: AppColors.primarySpark, fontWeight: FontWeight.bold), textAlign: TextAlign.right, overflow: TextOverflow.ellipsis)),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.sync, size: 12, color: AppColors.primarySpark),
+                ],
+              ),
             ),
           ],
         ),
