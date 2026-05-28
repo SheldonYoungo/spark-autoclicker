@@ -49,9 +49,12 @@ class NtpService {
             if (!completer.isCompleted) completer.complete(networkTime.toLocal());
           }
         }
+      }, onError: (e) {
+        debugPrint("NTP Socket async error: $e");
+        if (!completer.isCompleted) completer.completeError(e);
       });
 
-      return await completer.future.timeout(const Duration(seconds: 4));
+      return await completer.future.timeout(const Duration(milliseconds: 1500));
     } finally {
       socket?.close();
     }

@@ -39,11 +39,16 @@ void main() async {
         ),
       );
     }
+  } catch (e) {
+    debugPrint("Firebase ya estaba inicializado nativamente: $e");
+  }
+
+  try {
     // Cargar estado inicial de activación de hardware y filtros
     await ActivationService().init();
     await FilterService().loadFilters();
   } catch (e) {
-    debugPrint("Error al inicializar Firebase: $e");
+    debugPrint("Error al inicializar servicios: $e");
   }
 
   runApp(const SparkApp());

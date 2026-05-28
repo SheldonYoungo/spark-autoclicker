@@ -73,10 +73,15 @@ class UserModel {
       role: UserRole.values.byName(json['role']?.toString() ?? 'driver'),
       status: UserStatus.values.byName(json['status']?.toString() ?? 'pending'),
       expirationDate: DateTime.parse(json['expirationDate']?.toString() ?? DateTime.now().toIso8601String()),
-      authorizedDeviceIds: (json['authorizedDeviceIds'] as List<dynamic>?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          [],
+      authorizedDeviceIds: () {
+        final rawIds = json['authorizedDeviceIds'];
+        if (rawIds is List) {
+          return rawIds.map((e) => e.toString()).toList();
+        } else if (rawIds is Map) {
+          return rawIds.values.map((e) => e.toString()).toList();
+        }
+        return <String>[];
+      }(),
       maxSlots: (json['maxSlots'] is int) 
           ? json['maxSlots'] 
           : int.tryParse(json['maxSlots']?.toString() ?? '1') ?? 1,

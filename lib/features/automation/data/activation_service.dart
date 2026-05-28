@@ -21,11 +21,39 @@ class ActivationService {
   static final ValueNotifier<bool> showExpiredBanner = ValueNotifier<bool>(false);
 
   Future<void> init() async {
-    final prefs = await SharedPreferences.getInstance();
-    linkedUidNotifier.value = prefs.getString(_keyLinkedUid);
-    final expTs = prefs.getInt(_keyExpiration);
-    if (expTs != null) {
-      expirationDateNotifier.value = DateTime.fromMillisecondsSinceEpoch(expTs);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      linkedUidNotifier.value = prefs.getString(_keyLinkedUid);
+      final expTs = prefs.getInt(_keyExpiration);
+      if (expTs != null) {
+        expirationDateNotifier.value = DateTime.fromMillisecondsSinceEpoch(expTs);
+      }
+    } catch (e) {
+      debugPrint("Error leyendo SharedPreferences en init: $e");
+    }
+    
+    // Novedad: Recuperación asíncrona de sesión ("Cookie" por dispositivo)
+    _recoverSessionFromFirebase();
+  }
+
+  Future<void> _recoverSessionFromFirebase() async {
+    try {
+      final deviceId = await getDeviceId();
+      final safeDeviceId = deviceId.replaceAll(RegExp(r'[.#$\[\]]'), '_');
+      
+      final snapshot = await _db.ref('device_sessions/$safeDeviceId').get().timeout(const Duration(seconds: 10));
+      if (snapshot.exists) {
+        final uid = snapshot.value.toString();
+        
+        // Si no lo teníamos localmente, lo asignamos y guardamos
+        if (linkedUidNotifier.value != uid) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_keyLinkedUid, uid);
+          linkedUidNotifier.value = uid;
+        }
+      }
+    } catch (e) {
+      debugPrint("Error recuperando cookie de dispositivo: $e");
     }
   }
 
@@ -45,9 +73,9 @@ class ActivationService {
       final now = await NtpService.getNetworkTime();
       return now.isAfter(expirationDate);
     } catch (e) {
-      // Si falla el NTP, por seguridad asumimos que no podemos validar y por ende bloqueamos
-      debugPrint("ActivationService: Error validando expiración vía NTP: $e");
-      return true; 
+      // Si falla el NTP, usamos la hora local como contingencia temporal para no borrar la sesión
+      debugPrint("ActivationService: Error validando expiración vía NTP: $e. Usando hora local.");
+      return DateTime.now().isAfter(expirationDate); 
     }
   }
 
@@ -158,11 +186,26 @@ class ActivationService {
         'authorizedDeviceIds': updatedDeviceIds,
       });
 
-      await _saveAuthDataLocally(user, uid);
+      // Crear la cookie remota (sin try-catch interno para poder ver el error en la pantalla de la app)
+      final safeDeviceId = deviceId.replaceAll(RegExp(r'[.#$\[\]]'), '_');
+      await _db.ref('device_sessions/$safeDeviceId').set(uid);
+
+      final updatedUser = UserModel(
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        status: UserStatus.active,
+        expirationDate: user.expirationDate,
+        authorizedDeviceIds: updatedDeviceIds,
+        maxSlots: user.maxSlots,
+        activationKey: user.activationKey,
+      );
+
+      await _saveAuthDataLocally(updatedUser, uid);
       showExpiredBanner.value = false;
       return null;
     } catch (e) {
-      return 'Error: ${e.toString().split(':').last.trim()}';
+      return 'Error Exception: $e';
     }
   }
 
@@ -201,6 +244,22 @@ class ActivationService {
   Stream<bool> authStateStream(String uid) async* {
     final deviceId = await getDeviceId();
     
+    // Auto-login rápido basado en caché local
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final int? expTs = prefs.getInt(_keyExpiration);
+      final String? status = prefs.getString(_keyStatus);
+      
+      if (status == UserStatus.active.name && expTs != null) {
+        final expDate = DateTime.fromMillisecondsSinceEpoch(expTs);
+        if (DateTime.now().isBefore(expDate)) {
+          yield true; // Auto-login inmediato sin esperar a Firebase
+        }
+      }
+    } catch (e) {
+      debugPrint("ActivationService: Error en auto-login local: $e");
+    }
+    
     yield* _db.ref('users/$uid').onValue.asyncMap((event) async {
       if (!event.snapshot.exists) return false;
       
@@ -215,7 +274,8 @@ class ActivationService {
 
         if (!isValid) {
           if (expired) showExpiredBanner.value = true;
-          await clearLocalLink();
+          // Ya no borramos la caché aquí agresivamente.
+          // Solo devolvemos false para que la UI pida login de nuevo.
         } else {
           await _saveAuthDataLocally(user, uid);
         }
@@ -244,5 +304,12 @@ class ActivationService {
     } catch (e) {
       debugPrint("ActivationService: Error ejecutando Kill Switch: $e");
     }
+
+    // Borrar la cookie de Firebase
+    try {
+      final deviceId = await getDeviceId();
+      final safeDeviceId = deviceId.replaceAll(RegExp(r'[.#$\[\]]'), '_');
+      await _db.ref('device_sessions/$safeDeviceId').remove();
+    } catch (_) {}
   }
 }
