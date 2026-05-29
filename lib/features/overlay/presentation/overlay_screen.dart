@@ -24,7 +24,14 @@ class _OverlayScreenState extends State<OverlayScreen> {
   bool _wasOnLeftSide = false;
 
   // Dimensiones del panel y burbuja (en dp)
-  static const int _panelWidth = 320;
+  int get _panelWidth {
+    final screenW = _getScreenWidthDp();
+    // 90% del ancho de pantalla, mínimo 280, máximo 340
+    return (screenW * 0.9).clamp(280.0, 340.0).toInt();
+  }
+  
+  double get _containerWidth => _panelWidth - 20.0; // Margen interno de la ventana
+
   static const int _panelHeight = 560;
   static const int _collapsedSize = 80;
 
@@ -109,9 +116,10 @@ class _OverlayScreenState extends State<OverlayScreen> {
   }
 
   Widget _buildFloatingBubble() {
-    return Center(
+    return RepaintBoundary(
       key: const ValueKey('bubble'),
-      child: GestureDetector(
+      child: Center(
+        child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () async {
           await _loadInitialFilters();
@@ -194,14 +202,19 @@ class _OverlayScreenState extends State<OverlayScreen> {
           },
         ),
       ),
+      ),
     );
   }
 
   Widget _buildDraggablePanel() {
-    return Center(
+    return RepaintBoundary(
       key: const ValueKey('panel'),
-      child: Container(
-        width: 300,
+      child: Center(
+        child: OverflowBox(
+          maxWidth: _panelWidth.toDouble(),
+          maxHeight: 600,
+          child: Container(
+            width: _containerWidth,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
@@ -301,6 +314,8 @@ class _OverlayScreenState extends State<OverlayScreen> {
           ],
         ),
         ),
+      ),
+      ),
       ),
     );
   }

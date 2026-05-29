@@ -57,11 +57,21 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
     private fun logToFlutter(message: String) {
         Log.d(TAG, message)
-        Handler(Looper.getMainLooper()).post {
-            try {
-                SparkNativePlugin.sendLogToAll(message)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error enviando log: ${e.message}")
+        
+        // Filtrar logs para no saturar el hilo de UI en Flutter
+        val isCritical = message.startsWith("STATUS:") || 
+                         message.startsWith("✅") ||
+                         message.startsWith("🤖") ||
+                         message.startsWith("🛑") ||
+                         message.startsWith("💀")
+                         
+        if (isCritical) {
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    SparkNativePlugin.sendLogToAll(message)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error enviando log: ${e.message}")
+                }
             }
         }
     }
@@ -200,7 +210,14 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         val result = ScanResult()
 
         for (root in allRoots) {
-            collectNodes(root, result)
+            val rootPkg = root.packageName?.toString() ?: ""
+            // Optimization: Only traverse windows that belong to Walmart, Spark, or our Sandbox.
+            // This prevents massive lag when the Overlay is drawn on top of heavy third-party apps like Instagram.
+            if (rootPkg.contains("walmart", ignoreCase = true) || 
+                rootPkg.contains("spark", ignoreCase = true) ||
+                rootPkg == "com.spark.autoclicker") {
+                collectNodes(root, result)
+            }
         }
 
         if (!result.matchFound) return

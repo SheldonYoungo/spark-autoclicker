@@ -22,9 +22,10 @@ void main() async {
   // MARCADO DE ISOLATE PRINCIPAL: Crítico para que el FilterService sepa que puede usar MethodChannels
   FilterService.isMainIsolate = true;
 
-  // Inicializar escucha de logs nativos globalmente
+  // Inicializar escucha de logs nativos globalmente (Solo en Main Isolate)
   AccessibilityUtil.initNativeLogger((log) {
     debugPrint("📱 [LOG NATIVO] $log");
+    FilterService().processNativeEvent(log); // Procesa eventos críticos y los retransmite si es necesario
   }, isGlobal: true);
 
   try {
@@ -44,7 +45,6 @@ void main() async {
   }
 
   try {
-    // Cargar estado inicial de activación de hardware y filtros
     await ActivationService().init();
     await FilterService().loadFilters();
   } catch (e) {
@@ -58,14 +58,6 @@ void main() async {
 @pragma("vm:entry-point")
 void overlayMain() {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // En el Overlay, isMainIsolate permanece en false (por defecto)
-  
-  // El Overlay corre en su propio proceso/isolate, necesita su propio logger
-  AccessibilityUtil.initNativeLogger((log) {
-    debugPrint("☁️ [OVERLAY NATIVO] $log");
-    FilterService().processNativeEvent(log);
-  }, isGlobal: true);
 
   runApp(
     const MaterialApp(

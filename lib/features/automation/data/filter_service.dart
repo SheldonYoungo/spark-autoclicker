@@ -38,10 +38,8 @@ class FilterService {
     if (_listenerRegistered) return;
     _listenerRegistered = true;
 
-    // Escuchar FlutterOverlayWindow (por si acaso)
     FlutterOverlayWindow.overlayListener.listen(_handleIncomingMessage);
 
-    // Configurar IsolateNameServer para comunicación ultra-rápida entre Isolates
     _receivePort = ReceivePort();
     IsolateNameServer.removePortNameMapping(_portName + (isMainIsolate ? '_main' : '_overlay'));
     IsolateNameServer.registerPortWithName(_receivePort!.sendPort, _portName + (isMainIsolate ? '_main' : '_overlay'));
@@ -58,7 +56,6 @@ class FilterService {
       }
     }
 
-    // Procesar eventos de sincronización
     if (decodedEvent is String) {
       processNativeEvent(decodedEvent);
     } else if (decodedEvent is Map) {
@@ -77,18 +74,15 @@ class FilterService {
   }
 
   Future<void> _sendToOtherIsolate(dynamic message) async {
-    // Enviar vía plugin
     if (message is String) {
       await FlutterOverlayWindow.shareData(message);
     }
 
-    // Enviar vía SendPort (infalible entre Isolates activos)
     final targetPortName = _portName + (isMainIsolate ? '_overlay' : '_main');
     final sendPort = IsolateNameServer.lookupPortByName(targetPortName);
     sendPort?.send(message);
   }
 
-  /// Procesa eventos provenientes del motor nativo o de otros isolates
   void processNativeEvent(String event) {
     final isolateName = isMainIsolate ? 'Main' : 'Overlay';
     debugPrint("FilterService: [$isolateName] processNativeEvent -> $event");
@@ -97,11 +91,13 @@ class FilterService {
       debugPrint("FilterService: [$isolateName] 🟢 Detectada ACTIVACIÓN. Notifier actual: ${isBotActiveNotifier.value}");
       if (isBotActiveNotifier.value != true) {
         isBotActiveNotifier.value = true;
+        if (isMainIsolate) _sendToOtherIsolate('STATUS:ACTIVE');
       }
     } else if (event == 'STATUS:INACTIVE' || event == 'bot_deactivated') {
       debugPrint("FilterService: [$isolateName] 🔴 Detectada DESACTIVACIÓN. Notifier actual: ${isBotActiveNotifier.value}");
       if (isBotActiveNotifier.value != false) {
         isBotActiveNotifier.value = false;
+        if (isMainIsolate) _sendToOtherIsolate('STATUS:INACTIVE');
       }
     } else if (event == 'refresh_filters') {
       debugPrint("FilterService: [$isolateName] 🔄 Solicitud de refresco de filtros");
@@ -164,8 +160,6 @@ class FilterService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_storageKey, jsonEncode(newFilters.toJson()));
       
-      // Guardar explicitamente como double para el motor nativo
-      // Garantizando su uso como rango: precio >= minPay y distancia <= maxDistance
       await prefs.setDouble('minPay', newFilters.minPay);
       await prefs.setDouble('maxDistance', newFilters.maxDistance);
       
@@ -179,7 +173,6 @@ class FilterService {
   Future<void> toggleBot(bool active) async {
     debugPrint("FilterService: [${isMainIsolate ? 'Main' : 'Overlay'}] toggleBot($active)");
 
-    // Si somos el Overlay, intentamos delegar la acción al Main Isolate (que tiene Firebase y caché fresca)
     if (!isMainIsolate) {
       final mainPort = IsolateNameServer.lookupPortByName(_portName + '_main');
       if (mainPort != null) {
@@ -191,7 +184,6 @@ class FilterService {
     }
 
     if (active) {
-      // Verificaciones de seguridad antes de permitir el encendido
       if (isMainIsolate) {
         bool isEnabled = await AccessibilityUtil.isServiceEnabled();
         if (!isEnabled) {
@@ -207,16 +199,14 @@ class FilterService {
       }
     }
 
-    // Persistencia inmediata. El motor nativo detectará el cambio vía FileObserver/Listener.
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyBotActive, active);
     
-    // Forzar actualización local y global
     isBotActiveNotifier.value = active;
     await _sendToOtherIsolate(active ? 'bot_activated' : 'bot_deactivated');
   }
 
-  // Legacy/Helper - El motor nativo ahora se auto-sincroniza vía SharedPreferences
   Future<void> syncWithNative(bool active) async {
     if (isMainIsolate) {
       final filters = filtersNotifier.value;
