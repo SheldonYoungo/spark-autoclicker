@@ -11,10 +11,10 @@ import '../data/filter_service.dart';
 import '../domain/filter_model.dart';
 import '../../admin/data/admin_service.dart';
 import '../../admin/presentation/admin_dashboard.dart';
+import 'widgets/help_menu_modal.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 class BotMainScreen extends StatefulWidget {
   const BotMainScreen({super.key});
 
@@ -538,13 +538,8 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                                 ),
                               ),
                             IconButton(
-                              icon: const Icon(Icons.bug_report_outlined,
-                                  color: AppColors.secondaryCian),
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                    builder: (_) => const SandboxScreen()),
-                              ),
+                              icon: const Icon(Icons.help_outline, color: AppColors.secondaryCian),
+                              onPressed: () => HelpMenuModal.show(context),
                             ),
                             IconButton(
                               icon: const Icon(Icons.logout, color: Colors.white54, size: 20),
@@ -681,6 +676,20 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                                 fontWeight: FontWeight.w900,
                                 letterSpacing: 1),
                           ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Center(
+                      child: TextButton.icon(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const SandboxScreen()),
+                        ),
+                        icon: const Icon(Icons.bug_report_outlined, size: 16, color: Colors.white38),
+                        label: Text(
+                          'MODO PRUEBAS (SANDBOX)',
+                          style: GoogleFonts.inter(fontSize: 12, color: Colors.white38, letterSpacing: 1),
                         ),
                       ),
                     ),

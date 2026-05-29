@@ -466,7 +466,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       const CircularProgressIndicator(color: AppColors.primarySpark)
                     else
                       Text(
-                        'Spark Engine v1.0.2',
+                        'Spark Engine v1.0.4',
                         style: GoogleFonts.inter(color: Colors.white10, fontSize: 10),
                       ),
                       

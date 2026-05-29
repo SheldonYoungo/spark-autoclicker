@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'dart:ui';
@@ -33,6 +32,8 @@ class FilterService {
   static const String _portName = 'spark_isolate_port';
   ReceivePort? _receivePort;
   static bool _listenerRegistered = false;
+  
+  Timer? _reloadDebounce;
 
   void _initOverlayListener() {
     if (_listenerRegistered) return;
@@ -100,8 +101,11 @@ class FilterService {
         if (isMainIsolate) _sendToOtherIsolate('STATUS:INACTIVE');
       }
     } else if (event == 'refresh_filters') {
-      debugPrint("FilterService: [$isolateName] 🔄 Solicitud de refresco de filtros");
-      loadFilters(forceReload: true);
+      debugPrint("FilterService: [$isolateName] 🔄 Solicitud de refresco de filtros (Debounced)");
+      _reloadDebounce?.cancel();
+      _reloadDebounce = Timer(const Duration(milliseconds: 300), () {
+        loadFilters(forceReload: true);
+      });
     }
   }
 
