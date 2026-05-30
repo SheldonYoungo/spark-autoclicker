@@ -134,28 +134,31 @@ class _OverlayScreenState extends State<OverlayScreen> {
           // Umbral de 50dp distingue lados de forma segura (el imán solo deja x=0 o x=screenW-bubble).
           _wasOnLeftSide = _originalPosition != null && _originalPosition!.x > 50;
 
-          // FIX: El plugin nativo dispara una animación (TrayAnimationTimerTask) al soltar el toque (ACTION_UP).
-          // Si redimensionamos inmediatamente, el timer usa el nuevo ancho pero con destino viejo,
-          // lo que termina jalando el panel hacia el lado izquierdo y desbordándolo.
-          // Esperar 200ms asegura que el timer nativo termine/se cancele antes de mover la ventana.
+          // FIX: El plugin nativo dispara una animación al soltar el toque.
+          // Esperamos 200ms para asegurar que el magnetismo termine.
           await Future.delayed(const Duration(milliseconds: 200));
 
-          // FIX: Deshabilitar el drag (false) para el panel grande.
-          // Arrastrar un panel de 560px hacia los bordes dispara un bucle infinito (temblor) en MIUI.
+          // Deshabilitar el drag para el panel grande.
           await FlutterOverlayWindow.resizeOverlay(_panelWidth, _panelHeight, false);
+          
+          // Esperamos 50ms para que la vista nativa asimile el nuevo tamaño
+          await Future.delayed(const Duration(milliseconds: 50));
 
-          // Centramos el panel SIEMPRE en la pantalla (X e Y) para evitar colisiones con los bordes
-          if (_originalPosition != null) {
-            try {
-              final screenW = _getScreenWidthDp();
-              final centerX = ((screenW - _panelWidth) / 2).round().clamp(0, 999);
-              // Gravity.CENTER hace que y=0 sea el centro vertical absoluto
-              await FlutterOverlayWindow.moveOverlay(
-                OverlayPosition(centerX.toDouble(), 0),
-              );
-            } catch (e) {
-              debugPrint("moveOverlay centrar panel falló: $e");
-            }
+          // Centramos el panel SIEMPRE, sin importar si _originalPosition es null
+          try {
+            final screenW = _getScreenWidthDp();
+            // Dado que la gravedad es centerRight, X es la distancia desde el borde derecho.
+            // Para centrarlo horizontalmente, X debe ser la mitad del espacio sobrante.
+            final centerX = ((screenW - _panelWidth) / 2).round().clamp(0, 999);
+            
+            // Mantenemos Y en su posición original si es posible, o 0 (centro)
+            final destY = _originalPosition?.y ?? 0.0;
+            
+            await FlutterOverlayWindow.moveOverlay(
+              OverlayPosition(centerX.toDouble(), destY),
+            );
+          } catch (e) {
+            debugPrint("moveOverlay centrar panel falló: $e");
           }
 
           if (mounted) {
