@@ -18,6 +18,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 /**
  * Servicio de Accesibilidad para automatizar la captura de ofertas en Spark.
@@ -33,7 +36,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
         // Regex pre-compilados (se crean UNA sola vez, no en cada nodo)
         private val PRICE_REGEX = Regex("""\$\s*(\d+[\.,]\d+|\d+)""")
-        private val DISTANCE_REGEX = Regex("""(\d+[\.,]\d+|\d+)\s*(?:mi|mile|miles)""", RegexOption.IGNORE_CASE)
+        private val DISTANCE_REGEX = Regex("""(\d+[\.,]\d+|\d+)\s*(?:mi|mile|miles|millas|m)\b""", RegexOption.IGNORE_CASE)
         private val STORE_REGEX = Regex("""#\s*(\d+)""")
     }
 
@@ -192,6 +195,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         var matchPrice = 0.0
         var matchDistance = 999.0
         var matchStore = ""
+        var allTextCombined = ""
         var acceptNode: AccessibilityNodeInfo? = null
         var acceptRect: Rect? = null
     }
@@ -268,50 +272,76 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         val combined = text.ifBlank { cd }
 
         if (combined.isNotBlank()) {
-            // ── Detectar match de precio/distancia (regex pre-compilados) ──
+            // Acumular el texto para cruces de palabras clave en toda la pantalla
+            result.allTextCombined += "$combined "
+
+            // ── Detectar match de precio/distancia (Acumulativo) ──
             if (!result.matchFound) {
                 val priceMatches = PRICE_REGEX.findAll(combined).toList()
                 if (priceMatches.isNotEmpty()) {
                     val maxPrice = priceMatches.maxOfOrNull {
                         it.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 0.0
                     } ?: 0.0
+                    if (maxPrice > result.matchPrice) result.matchPrice = maxPrice
+                }
 
-                    val minDist = DISTANCE_REGEX.findAll(combined).toList().let { matches ->
-                        if (matches.isNotEmpty()) matches.minOfOrNull {
-                            it.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 999.0
-                        } ?: 999.0 else 999.0
+                val distMatches = DISTANCE_REGEX.findAll(combined).toList()
+                if (distMatches.isNotEmpty()) {
+                    val minDist = distMatches.minOfOrNull {
+                        it.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 999.0
+                    } ?: 999.0
+                    if (minDist < result.matchDistance) result.matchDistance = minDist
+                }
+
+                val storeMatch = STORE_REGEX.find(combined)?.groupValues?.get(1)
+                if (storeMatch != null) result.matchStore = storeMatch
+
+                // Evaluación global de lo acumulado hasta ahora
+                if (result.matchPrice >= minPrice && result.matchPrice > 0 && result.matchDistance <= maxDistance) {
+                    val storeOk = storeId.isEmpty() || storeId == result.matchStore
+                    val typeOk = if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) true
+                    else {
+                        val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                        kws.isEmpty() || kws.any { result.allTextCombined.contains(it, ignoreCase = true) }
                     }
-
-                    val store = STORE_REGEX.find(combined)?.groupValues?.get(1) ?: ""
-
-                    if (maxPrice >= minPrice && maxPrice > 0 && minDist <= maxDistance) {
-                        val storeOk = storeId.isEmpty() || storeId == store
-                        val typeOk = if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) true
-                        else {
-                            val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
-                            kws.isEmpty() || kws.any { combined.contains(it, ignoreCase = true) }
-                        }
-                        if (storeOk && typeOk) {
-                            result.matchFound = true
-                            result.matchPrice = maxPrice
-                            result.matchDistance = minDist
-                            result.matchStore = store
-                        }
+                    if (storeOk && typeOk) {
+                        result.matchFound = true
                     }
                 }
             }
 
-            // ── Detectar botón Accept/Aceptar (sin .lowercase(), usa containsIgnoreCase) ──
+            // ── Detectar botón Accept/Aceptar (Verificando Clickable) ──
             if (result.acceptNode == null) {
                 if (acceptKeywords.any { combined.contains(it, ignoreCase = true) }) {
-                    result.acceptNode = AccessibilityNodeInfo.obtain(node)
-                    result.acceptRect = Rect().also { node.getBoundsInScreen(it) }
-                    Log.d(TAG, "🔎 Accept encontrado: '$combined' click=${node.isClickable} rect=${result.acceptRect} d=$depth")
+                    if (node.isClickable || node.className?.toString()?.contains("Button", ignoreCase = true) == true) {
+                        result.acceptNode = AccessibilityNodeInfo.obtain(node)
+                        result.acceptRect = Rect().also { node.getBoundsInScreen(it) }
+                        Log.d(TAG, "🔎 Accept encontrado (Directo): '$combined' click=${node.isClickable} rect=${result.acceptRect} d=$depth")
+                    } else {
+                        var parent = node.parent
+                        var isParentClickable = false
+                        while (parent != null) {
+                            if (parent.isClickable || parent.className?.toString()?.contains("Button", ignoreCase = true) == true) {
+                                isParentClickable = true
+                                parent.recycle()
+                                break
+                            }
+                            val next = parent.parent
+                            parent.recycle()
+                            parent = next
+                        }
+                        if (isParentClickable) {
+                            result.acceptNode = AccessibilityNodeInfo.obtain(node)
+                            result.acceptRect = Rect().also { node.getBoundsInScreen(it) }
+                            Log.d(TAG, "🔎 Accept encontrado (Padre Clickable): '$combined' rect=${result.acceptRect} d=$depth")
+                        }
+                    }
                 }
             }
         }
 
         for (i in 0 until node.childCount) {
+            if (result.matchFound && result.acceptNode != null) break // VERDADERO EARLY EXIT
             val child = node.getChild(i)
             if (child != null) {
                 collectNodes(child, result, depth + 1)
@@ -321,16 +351,22 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     }
 
     /**
-     * Ejecuta clic en un nodo con 3 intentos:
-     *   1. ACTION_CLICK directo
-     *   2. ACTION_CLICK en padres clickeables
-     *   3. Gesto (dispatchGesture) en coordenadas del nodo
+     * Ejecuta clic en un nodo priorizando Gesto (bypass anti-bot) o escalando.
      */
     private suspend fun clickNode(node: AccessibilityNodeInfo, fallbackRect: Rect?): Boolean {
         return withContext(Dispatchers.Main) {
             lastClickTime = System.currentTimeMillis()
 
-            // Intento 1: clic directo
+            val rect = fallbackRect ?: Rect().also { node.getBoundsInScreen(it) }
+            
+            // Intento 1: PRIORIDAD GESTO EN COORDENADAS (Evita falsos positivos de ACTION_CLICK)
+            if (!rect.isEmpty) {
+                logToFlutter("🎯 Intentando Gesto en coordenadas: $rect")
+                val gestureOk = clickAt(rect)
+                if (gestureOk) return@withContext true
+            }
+
+            // Intento 2: clic directo (Fallback)
             if (node.isClickable) {
                 if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                     logToFlutter("⚡ ACTION_CLICK directo OK")
@@ -338,7 +374,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 }
             }
 
-            // Intento 2: escalar a padres
+            // Intento 3: escalar a padres (Fallback)
             var parent = node.parent
             var d = 0
             while (parent != null && d < 10) {
@@ -357,49 +393,50 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             }
             parent?.recycle()
 
-            // Intento 3: gesto en coordenadas
-            val rect = fallbackRect ?: Rect().also { node.getBoundsInScreen(it) }
-            if (!rect.isEmpty) {
-                logToFlutter("🎯 Gesto en coordenadas: $rect")
-                clickAt(rect)
-                return@withContext true
-            }
             false
         }
     }
 
-    fun clickAt(x: Float, y: Float) {
+    suspend fun clickAt(x: Float, y: Float): Boolean {
         val rect = Rect(x.toInt() - 5, y.toInt() - 5, x.toInt() + 5, y.toInt() + 5)
-        clickAt(rect)
+        return clickAt(rect)
     }
 
-    fun clickAt(rect: Rect) {
-        if (!isBotActive) return
+    suspend fun clickAt(rect: Rect): Boolean {
+        if (!isBotActive) return false
         val delayMs = Random.nextLong(10, 80)
-        Handler(Looper.getMainLooper()).postDelayed({
-            if (!isBotActive) return@postDelayed
-            val width = rect.width()
-            val height = rect.height()
-            val maxJitterX = minOf(10, maxOf(1, (width * 0.25).toInt()))
-            val maxJitterY = minOf(10, maxOf(1, (height * 0.25).toInt()))
-            val jitterX = rect.centerX() + Random.nextInt(-maxJitterX, maxJitterX + 1).toFloat()
-            val jitterY = rect.centerY() + Random.nextInt(-maxJitterY, maxJitterY + 1).toFloat()
-            val strokeDuration = Random.nextLong(30, 70)
+        delay(delayMs)
+        
+        if (!isBotActive) return false
+        val width = rect.width()
+        val height = rect.height()
+        val maxJitterX = minOf(10, maxOf(1, (width * 0.25).toInt()))
+        val maxJitterY = minOf(10, maxOf(1, (height * 0.25).toInt()))
+        val jitterX = rect.centerX() + Random.nextInt(-maxJitterX, maxJitterX + 1).toFloat()
+        val jitterY = rect.centerY() + Random.nextInt(-maxJitterY, maxJitterY + 1).toFloat()
+        val strokeDuration = Random.nextLong(30, 70)
 
-            val path = Path()
-            path.moveTo(jitterX, jitterY)
-            val gestureBuilder = GestureDescription.Builder()
-            gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, strokeDuration))
+        val path = Path()
+        path.moveTo(jitterX, jitterY)
+        val gestureBuilder = GestureDescription.Builder()
+        gestureBuilder.addStroke(GestureDescription.StrokeDescription(path, 0, strokeDuration))
 
-            dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
+        return suspendCoroutine { continuation ->
+            val dispatched = dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
                     logToFlutter("⚡ Gesto completado (Jitter)")
+                    continuation.resume(true)
                 }
                 override fun onCancelled(gestureDescription: GestureDescription?) {
                     logToFlutter("❌ Gesto cancelado")
+                    continuation.resume(false)
                 }
             }, null)
-        }, delayMs)
+            
+            if (!dispatched) {
+                continuation.resume(false)
+            }
+        }
     }
 
     override fun onInterrupt() {

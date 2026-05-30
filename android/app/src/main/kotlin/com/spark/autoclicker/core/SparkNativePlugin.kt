@@ -14,6 +14,9 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import android.app.Activity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class SparkNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private lateinit var channel: MethodChannel
@@ -132,8 +135,10 @@ class SparkNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 val y = call.argument<Double>("y")?.toFloat() ?: 0f
                 val service = SparkAccessibilityService.instance
                 if (service != null) {
-                    service.clickAt(x, y)
-                    result.success(true)
+                    CoroutineScope(Dispatchers.Main).launch {
+                        service.clickAt(x, y)
+                        result.success(true)
+                    }
                 } else {
                     result.error("SERVICE_NOT_RUNNING", "Service not running", null)
                 }
