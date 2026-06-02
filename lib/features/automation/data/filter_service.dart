@@ -115,16 +115,11 @@ class FilterService {
       final prefs = await SharedPreferences.getInstance();
       if (forceReload) await prefs.reload();
       
-      isBotActiveNotifier.value = prefs.getBool(_keyBotActive) ?? false;
-
-      // Verificación de salud: Sincronizar con el estado REAL del motor nativo (si es el isolate principal)
-      if (isMainIsolate) {
-        final bool realStatus = await AccessibilityUtil.getBotStatus();
-        if (realStatus != isBotActiveNotifier.value) {
-          debugPrint("FilterService: [Main] Desajuste detectado. Prefs=${isBotActiveNotifier.value}, Motor=$realStatus. Corrigiendo...");
-          isBotActiveNotifier.value = realStatus;
-          await prefs.setBool(_keyBotActive, realStatus);
-        }
+      // CRÍTICO: Solo leer el estado del bot en la carga INICIAL.
+      // Nunca sobrescribir si el bot ya está activo (previene lecturas stale
+      // de SharedPreferences que causan autodesactivación tras clics).
+      if (!_isInitialized) {
+        isBotActiveNotifier.value = prefs.getBool(_keyBotActive) ?? false;
       }
 
       final String? jsonStr = prefs.getString(_storageKey);
@@ -167,6 +162,13 @@ class FilterService {
       await prefs.setDouble('minPay', newFilters.minPay);
       await prefs.setDouble('maxDistance', newFilters.maxDistance);
       
+      if (isMainIsolate) {
+        // Si el bot está activo, empujar los nuevos filtros inmediatamente al motor nativo
+        if (isBotActiveNotifier.value) {
+          await syncWithNative(true);
+        }
+      }
+
       // Notificar a otros isolates
       await _sendToOtherIsolate({'type': 'refresh_filters'});
     } catch (e) {
@@ -176,16 +178,6 @@ class FilterService {
 
   Future<void> toggleBot(bool active) async {
     debugPrint("FilterService: [${isMainIsolate ? 'Main' : 'Overlay'}] toggleBot($active)");
-
-    if (!isMainIsolate) {
-      final mainPort = IsolateNameServer.lookupPortByName(_portName + '_main');
-      if (mainPort != null) {
-        debugPrint("FilterService: Delegando toggleBot al Main Isolate...");
-        mainPort.send({'type': 'toggle_request', 'active': active});
-        return;
-      }
-      debugPrint("FilterService: Main Isolate no disponible, fallback local.");
-    }
 
     if (active) {
       if (isMainIsolate) {
@@ -203,11 +195,22 @@ class FilterService {
       }
     }
 
-
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyBotActive, active);
     
     isBotActiveNotifier.value = active;
+
+    if (!isMainIsolate) {
+      final mainPort = IsolateNameServer.lookupPortByName(_portName + '_main');
+      if (mainPort != null) {
+        debugPrint("FilterService: Delegando toggleBot al Main Isolate...");
+        mainPort.send({'type': 'toggle_request', 'active': active});
+      }
+    } else {
+      // Sincronización explícita con el motor nativo
+      await syncWithNative(active);
+    }
+    
     await _sendToOtherIsolate(active ? 'bot_activated' : 'bot_deactivated');
   }
 

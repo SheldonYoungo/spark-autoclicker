@@ -58,6 +58,11 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
+    @Volatile
+    private var isScanning = false
+
+    private var scanJob: kotlinx.coroutines.Job? = null
+
     private fun logToFlutter(message: String) {
         Log.d(TAG, message)
         
@@ -83,7 +88,6 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         super.onServiceConnected()
         instance = this
         
-        // Inicializar escucha de preferencias para sincronización Isolate-agnostic
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs?.registerOnSharedPreferenceChangeListener(this)
         
@@ -93,12 +97,26 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         logToFlutter("✅ Servicio de Accesibilidad Vinculado (Sync Nativa OK)")
     }
 
+    /**
+     * Listener SEGURO de SharedPreferences.
+     * Solo reacciona a cambios REALES en is_bot_active_state.
+     * NUNCA emite STATUS:INACTIVE (eso causaba la autodesactivación).
+     * Solo sincroniza cuando el estado cambia genuinamente.
+     */
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
-        // Las llaves del plugin SharedPreferences de Flutter suelen tener prefijo "flutter."
-        if (key == "flutter.is_bot_active_state" || key == "flutter.bot_filters_config") {
-            Log.d(TAG, "🔄 Cambio detectado en Prefs: $key. Sincronizando...")
-            syncWithPrefs()
+        if (key != "flutter.is_bot_active_state" && key != "flutter.bot_filters_config") return
+        
+        val p = prefs ?: return
+        val newActive = p.getBoolean("flutter.is_bot_active_state", false)
+        
+        // Solo actuar si el estado REALMENTE cambió
+        if (newActive == isBotActive && key == "flutter.is_bot_active_state") {
+            Log.d(TAG, "🔄 Prefs cambió ($key) pero estado idéntico ($newActive). Ignorando.")
+            return
         }
+        
+        Log.d(TAG, "🔄 Cambio detectado en Prefs: $key. isBotActive: $isBotActive -> $newActive")
+        syncWithPrefs()
     }
 
     private fun syncWithPrefs() {
@@ -138,9 +156,11 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             updateConfig(active, 0.0, 99.0, "", "Any", 500)
         }
         
-        // Emitir estado actual para sincronizar UI de Isolates que podrían estar dormidos
-        val statusEvent = if (active) "STATUS:ACTIVE" else "STATUS:INACTIVE"
-        logToFlutter(statusEvent)
+        // Solo emitir STATUS:ACTIVE si el bot realmente estaba ON (caso: service restart).
+        // NUNCA emitir STATUS:INACTIVE aquí — causaría autodesactivación en Flutter.
+        if (active) {
+            logToFlutter("STATUS:ACTIVE")
+        }
     }
 
     fun updateConfig(active: Boolean, price: Double, distance: Double, store: String, type: String, speed: Int) {
@@ -154,7 +174,51 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         val statusText = if (active) "ON" else "OFF"
         logToFlutter("🤖 Motor Nativo: Sincronización Automática -> $statusText")
         Log.d(TAG, "⚙️ Config: MinPrice=$price, Distance=$distance, Store=$store, Type=$type, Speed=${scanSpeed}ms")
+
+        if (active) {
+            startScanningLoop()
+        } else {
+            stopScanningLoop()
+        }
     }
+
+    private fun startScanningLoop() {
+        scanJob?.cancel()
+        scanJob = serviceScope.launch {
+            Log.d(TAG, "⏰ Iniciando loop de escaneo periódico")
+            while (isBotActive) {
+                if (!isScanning) {
+                    val allRoots = mutableListOf<AccessibilityNodeInfo>()
+                    withContext(Dispatchers.Main) {
+                        try {
+                            windows?.forEach { w -> w.root?.let { allRoots.add(it) } }
+                        } catch (_: Exception) {}
+                        if (allRoots.isEmpty()) rootInActiveWindow?.let { allRoots.add(it) }
+                    }
+
+                    if (allRoots.isNotEmpty()) {
+                        isScanning = true
+                        try {
+                            processAllWindows(allRoots)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error en loop de escaneo: ${e.message}")
+                        } finally {
+                            allRoots.forEach { it.recycle() }
+                            isScanning = false
+                        }
+                    }
+                }
+                delay(scanSpeed)
+            }
+            Log.d(TAG, "⏰ Loop de escaneo periódico de bot detenido")
+        }
+    }
+
+    private fun stopScanningLoop() {
+        scanJob?.cancel()
+        scanJob = null
+    }
+
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (!isBotActive) return
@@ -168,6 +232,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             val currentTime = System.currentTimeMillis()
             if (currentTime - lastClickTime < clickDebounce) return
             if (currentTime - lastScanTime < scanSpeed) return
+            if (isScanning) return
+            isScanning = true
             lastScanTime = currentTime
 
             val allRoots = mutableListOf<AccessibilityNodeInfo>()
@@ -175,7 +241,10 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 windows?.forEach { w -> w.root?.let { allRoots.add(it) } }
             } catch (_: Exception) {}
             if (allRoots.isEmpty()) rootInActiveWindow?.let { allRoots.add(it) }
-            if (allRoots.isEmpty()) return
+            if (allRoots.isEmpty()) {
+                isScanning = false
+                return
+            }
 
             serviceScope.launch {
                 try {
@@ -184,6 +253,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                     Log.e(TAG, "Error escaneando: ${e.message}")
                 } finally {
                     allRoots.forEach { it.recycle() }
+                    isScanning = false
                 }
             }
         }
@@ -208,57 +278,60 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
      * UN SOLO recorrido de TODAS las ventanas que simultáneamente:
      *   - Evalúa precio/distancia/tienda → detecta match
      *   - Busca nodo cuyo texto contenga "Accept"/"Aceptar" → guarda referencia
-     * Al final, si hay match Y hay botón → clic.
      */
     private suspend fun processAllWindows(allRoots: List<AccessibilityNodeInfo>) {
-        val result = ScanResult()
-
         for (root in allRoots) {
             val rootPkg = root.packageName?.toString() ?: ""
+            
             // Optimization: Only traverse windows that belong to Walmart, Spark, or our Sandbox.
             // This prevents massive lag when the Overlay is drawn on top of heavy third-party apps like Instagram.
             if (rootPkg.contains("walmart", ignoreCase = true) || 
                 rootPkg.contains("spark", ignoreCase = true) ||
                 rootPkg == "com.spark.autoclicker") {
+                
+                val result = ScanResult()
                 collectNodes(root, result)
-            }
-        }
+                
+                if (result.matchFound) {
+                    logToFlutter("🎯 Match ($rootPkg): \$${result.matchPrice} | ${result.matchDistance} mi | #${result.matchStore}")
 
-        if (!result.matchFound) return
+                    // ── Estrategia 1: Nodo "Accept" encontrado durante recorrido manual ──
+                    if (result.acceptNode != null) {
+                        logToFlutter("🔍 Botón Accept localizado (recorrido manual)")
+                        val clicked = clickNode(result.acceptNode!!, result.acceptRect)
+                        result.acceptNode!!.recycle()
+                        if (clicked) {
+                            logToFlutter("✅ ¡Clic ejecutado!")
+                            return
+                        }
+                    }
 
-        logToFlutter("🎯 Match: \$${result.matchPrice} | ${result.matchDistance} mi | #${result.matchStore}")
-
-        // ── Estrategia 1: Nodo "Accept" encontrado durante recorrido manual ──
-        if (result.acceptNode != null) {
-            logToFlutter("🔍 Botón Accept localizado (recorrido manual)")
-            val clicked = clickNode(result.acceptNode!!, result.acceptRect)
-            result.acceptNode!!.recycle()
-            if (clicked) {
-                logToFlutter("✅ ¡Clic ejecutado!")
-                return
-            }
-        }
-
-        // ── Estrategia 2: findAccessibilityNodeInfosByText (apps nativas) ──
-        for (root in allRoots) {
-            for (kw in acceptKeywords) {
-                val nodes = root.findAccessibilityNodeInfosByText(kw)
-                if (nodes.isNotEmpty()) {
-                    logToFlutter("🔍 [API nativa] Botón '$kw' encontrado (${nodes.size})")
-                    val clicked = clickNode(nodes[0], null)
-                    nodes.forEach { it.recycle() }
-                    if (clicked) {
-                        logToFlutter("✅ ¡Clic por API nativa!")
-                        return
+                    // ── Estrategia 2: findAccessibilityNodeInfosByText (apps nativas) ──
+                    for (kw in acceptKeywords) {
+                        val nodes = root.findAccessibilityNodeInfosByText(kw)
+                        if (nodes.isNotEmpty()) {
+                            val validNode = nodes.firstOrNull { node ->
+                                val rect = Rect().also { node.getBoundsInScreen(it) }
+                                val isNotTooGiant = rect.width() < 800 && rect.height() < 300
+                                val hasBounds = !rect.isEmpty
+                                isNotTooGiant && hasBounds
+                            }
+                            if (validNode != null) {
+                                logToFlutter("🔍 [API nativa] Botón '$kw' válido encontrado")
+                                val clicked = clickNode(validNode, null)
+                                nodes.forEach { it.recycle() }
+                                if (clicked) {
+                                    logToFlutter("✅ ¡Clic por API nativa!")
+                                    return
+                                }
+                            }
+                            nodes.forEach { it.recycle() }
+                        }
                     }
                 }
-                nodes.forEach { it.recycle() }
             }
         }
-
-        logToFlutter("❌ Match OK pero no se encontró botón Accept.")
     }
-
     /**
      * Recorrido recursivo que recolecta match de precio Y nodo Accept en un solo pase.
      */
@@ -440,12 +513,14 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     }
 
     override fun onInterrupt() {
+        stopScanningLoop()
         logToFlutter("🛑 Servicio interrumpido")
         instance = null
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        stopScanningLoop()
         prefs?.unregisterOnSharedPreferenceChangeListener(this)
         logToFlutter("💀 Servicio destruido")
         instance = null

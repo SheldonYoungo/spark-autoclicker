@@ -26,11 +26,11 @@ class _OverlayScreenState extends State<OverlayScreen> {
   // Dimensiones del panel y burbuja (en dp)
   int get _panelWidth {
     final screenW = _getScreenWidthDp();
-    // 90% del ancho de pantalla, mínimo 280, máximo 340
-    return (screenW * 0.9).clamp(280.0, 340.0).toInt();
+    // 85% del ancho de pantalla, responsivo sin ser invasivo
+    return (screenW * 0.85).clamp(280.0, 380.0).toInt();
   }
   
-  double get _containerWidth => _panelWidth - 20.0; // Margen interno de la ventana
+  double get _containerWidth => _panelWidth - 24.0; // Padding interno simétrico
 
   static const int _panelHeight = 560;
   static const int _collapsedSize = 80;
@@ -396,6 +396,7 @@ class _OverlayScreenState extends State<OverlayScreen> {
       await _filterService.toggleBot(newState);
     } catch (e) {
       debugPrint("Overlay: Error al solicitar toggle del bot: $e");
+    } finally {
       if (mounted) setState(() => _isValidating = false);
     }
   }

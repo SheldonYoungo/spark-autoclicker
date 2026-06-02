@@ -161,7 +161,7 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '${tempVal.toInt()} mi',
+                '${tempVal.toStringAsFixed(1)} mi',
                 style: GoogleFonts.inter(
                     fontSize: 48,
                     fontWeight: FontWeight.bold,
@@ -171,7 +171,7 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                 value: tempVal,
                 min: 1,
                 max: 100,
-                divisions: 99,
+                divisions: 990,
                 activeColor: AppColors.secondaryCian,
                 inactiveColor: Colors.white10,
                 onChanged: (val) => setModalState(() => tempVal = val),
@@ -600,7 +600,7 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                         ),
                         FilterCard(
                           title: 'Distancia Máx.',
-                          value: filters.maxDistance.toStringAsFixed(0),
+                          value: filters.maxDistance.toStringAsFixed(1),
                           unit: 'mi',
                           icon: Icons.map_outlined,
                           accentColor: AppColors.primarySpark,
