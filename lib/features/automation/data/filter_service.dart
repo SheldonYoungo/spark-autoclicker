@@ -180,6 +180,11 @@ class FilterService {
     debugPrint("FilterService: [${isMainIsolate ? 'Main' : 'Overlay'}] toggleBot($active)");
 
     if (active) {
+      if (filtersNotifier.value.storeCode == null || filtersNotifier.value.storeCode!.isEmpty) {
+        debugPrint("FilterService: Tienda no configurada, abortando toggle.");
+        return;
+      }
+
       if (isMainIsolate) {
         bool isEnabled = await AccessibilityUtil.isServiceEnabled();
         if (!isEnabled) {

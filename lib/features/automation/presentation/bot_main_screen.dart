@@ -103,40 +103,65 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
   void _showStoreModal(String? currentVal) {
     final TextEditingController controller =
         TextEditingController(text: currentVal ?? '');
-    _showStyledModal(
-      title: 'Código de Tienda',
-      subtitle: 'Ingresa el número de tienda de Walmart (ej: 7178)',
-      child: TextField(
-        controller: controller,
-        autofocus: true,
-        keyboardType: TextInputType.number,
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(6),
-        ],
-        style: const TextStyle(
-            color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-        textAlign: TextAlign.center,
-        decoration: InputDecoration(
-          prefixText: '#',
-          prefixStyle:
-              const TextStyle(color: AppColors.primarySpark, fontSize: 24),
-          filled: true,
-          fillColor: Colors.white.withValues(alpha: 0.05),
-          border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide.none),
-          hintText: '000000',
-          hintStyle: const TextStyle(color: Colors.white24),
+    final ValueNotifier<bool> errorNotifier = ValueNotifier<bool>(false);
+        
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        child: _StyledModalContainer(
+          title: 'Código de Tienda',
+          subtitle: 'Ingresa los 4 dígitos de la tienda Walmart (ej: 7178)',
+          hasErrorNotifier: errorNotifier,
+          onSave: () async {
+            final val = controller.text.trim();
+            if (val.length != 4) {
+              errorNotifier.value = true;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('⚠️ Debes ingresar exactamente 4 dígitos.'),
+                  backgroundColor: Colors.redAccent,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+              await Future.delayed(const Duration(milliseconds: 600));
+              errorNotifier.value = false;
+              return;
+            }
+            _filterService.saveFilters(
+                _filterService.filtersNotifier.value.copyWith(storeCode: val));
+            Navigator.pop(context);
+          },
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(4),
+            ],
+            style: const TextStyle(
+                color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+            decoration: InputDecoration(
+              prefixText: '#',
+              prefixStyle:
+                  const TextStyle(color: AppColors.primarySpark, fontSize: 24),
+              filled: true,
+              fillColor: Colors.white.withValues(alpha: 0.05),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none),
+              hintText: '0000',
+              hintStyle: const TextStyle(color: Colors.white24),
+            ),
+          ),
         ),
       ),
-      onSave: () {
-        final val = controller.text.trim();
-        _filterService
-            .saveFilters(_filterService.filtersNotifier.value.copyWith(
-          storeCode: val.isEmpty ? null : val,
-        ));
-      },
     );
   }
 
@@ -169,9 +194,9 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
               ),
               Slider(
                 value: tempVal,
-                min: 1,
+                min: 0,
                 max: 100,
-                divisions: 990,
+                divisions: 1000,
                 activeColor: AppColors.secondaryCian,
                 inactiveColor: Colors.white10,
                 onChanged: (val) => setModalState(() => tempVal = val),
@@ -181,7 +206,7 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('1 mi', style: TextStyle(color: Colors.white24)),
+                    Text('0 mi', style: TextStyle(color: Colors.white24)),
                     Text('100 mi', style: TextStyle(color: Colors.white24)),
                   ],
                 ),
@@ -592,10 +617,11 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                       children: [
                         FilterCard(
                           title: 'Tienda Walmart',
-                          value: filters.storeCode != null
+                          value: filters.storeCode != null && filters.storeCode!.isNotEmpty
                               ? '#${filters.storeCode}'
-                              : 'TODAS',
+                              : 'FALTA',
                           icon: Icons.storefront_outlined,
+                          accentColor: (filters.storeCode == null || filters.storeCode!.isEmpty) ? Colors.redAccent : AppColors.secondaryCian,
                           onTap: () => _showStoreModal(filters.storeCode),
                         ),
                         FilterCard(
@@ -709,7 +735,19 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
       valueListenable: _filterService.isBotActiveNotifier,
       builder: (context, isActive, _) {
         return GestureDetector(
-          onTap: () => _filterService.toggleBot(!isActive),
+          onTap: () {
+            if (!isActive && (filters.storeCode == null || filters.storeCode!.isEmpty)) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('⚠️ Debes ingresar un Código de Tienda primero para activar el bot.'),
+                  backgroundColor: Colors.redAccent,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+              return;
+            }
+            _filterService.toggleBot(!isActive);
+          },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             padding: const EdgeInsets.all(24),
@@ -993,12 +1031,14 @@ class _StyledModalContainer extends StatelessWidget {
   final String subtitle;
   final Widget child;
   final VoidCallback onSave;
+  final ValueNotifier<bool>? hasErrorNotifier;
 
   const _StyledModalContainer(
       {required this.title,
       required this.subtitle,
       required this.child,
-      required this.onSave});
+      required this.onSave,
+      this.hasErrorNotifier});
 
   @override
   Widget build(BuildContext context) {
@@ -1033,18 +1073,34 @@ class _StyledModalContainer extends StatelessWidget {
           const SizedBox(height: 40),
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton(
-              onPressed: onSave,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primarySpark,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(vertical: 18),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
-              ),
-              child: const Text('CONFIRMAR CAMBIOS',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
+            child: hasErrorNotifier != null
+                ? ValueListenableBuilder<bool>(
+                    valueListenable: hasErrorNotifier!,
+                    builder: (context, hasError, _) => ElevatedButton(
+                      onPressed: onSave,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: hasError ? Colors.redAccent : AppColors.primarySpark,
+                        foregroundColor: hasError ? Colors.white : Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 18),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                      ),
+                      child: const Text('CONFIRMAR CAMBIOS',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  )
+                : ElevatedButton(
+                    onPressed: onSave,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primarySpark,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: const Text('CONFIRMAR CAMBIOS',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
           ),
         ],
       ),

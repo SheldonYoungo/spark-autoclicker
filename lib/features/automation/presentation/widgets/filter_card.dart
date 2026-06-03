@@ -64,25 +64,33 @@ class FilterCard extends StatelessWidget {
                 ),
                 const Spacer(),
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      value,
-                      style: GoogleFonts.inter(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.white,
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          value,
+                          style: GoogleFonts.inter(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.white,
+                          ),
+                        ),
                       ),
                     ),
                     if (unit != null) ...[
                       const SizedBox(width: 4),
-                      Text(
-                        unit!,
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: accentColor,
-                          fontWeight: FontWeight.w500,
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 2.0),
+                        child: Text(
+                          unit!,
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: accentColor,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
                     ],

@@ -292,6 +292,19 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 val result = ScanResult()
                 collectNodes(root, result)
                 
+                // Evaluamos los filtros globalmente con la información acumulada de toda la pantalla
+                if (result.matchPrice >= minPrice && result.matchPrice > 0 && result.matchDistance <= maxDistance) {
+                    val storeOk = storeId.isNotEmpty() && storeId == result.matchStore
+                    val typeOk = if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) true
+                    else {
+                        val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                        kws.isEmpty() || kws.any { result.allTextCombined.contains(it, ignoreCase = true) }
+                    }
+                    if (storeOk && typeOk) {
+                        result.matchFound = true
+                    }
+                }
+                
                 if (result.matchFound) {
                     logToFlutter("🎯 Match ($rootPkg): \$${result.matchPrice} | ${result.matchDistance} mi | #${result.matchStore}")
 
@@ -349,39 +362,27 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             result.allTextCombined += "$combined "
 
             // ── Detectar match de precio/distancia (Acumulativo) ──
-            if (!result.matchFound) {
-                val priceMatches = PRICE_REGEX.findAll(combined).toList()
-                if (priceMatches.isNotEmpty()) {
-                    val maxPrice = priceMatches.maxOfOrNull {
-                        it.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 0.0
-                    } ?: 0.0
-                    if (maxPrice > result.matchPrice) result.matchPrice = maxPrice
-                }
+            val priceMatches = PRICE_REGEX.findAll(combined).toList()
+            if (priceMatches.isNotEmpty()) {
+                val maxPrice = priceMatches.maxOfOrNull {
+                    it.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 0.0
+                } ?: 0.0
+                if (maxPrice > result.matchPrice) result.matchPrice = maxPrice
+            }
 
-                val distMatches = DISTANCE_REGEX.findAll(combined).toList()
-                if (distMatches.isNotEmpty()) {
-                    val minDist = distMatches.minOfOrNull {
-                        it.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 999.0
-                    } ?: 999.0
-                    if (minDist < result.matchDistance) result.matchDistance = minDist
-                }
-
-                val storeMatch = STORE_REGEX.find(combined)?.groupValues?.get(1)
-                if (storeMatch != null) result.matchStore = storeMatch
-
-                // Evaluación global de lo acumulado hasta ahora
-                if (result.matchPrice >= minPrice && result.matchPrice > 0 && result.matchDistance <= maxDistance) {
-                    val storeOk = storeId.isEmpty() || storeId == result.matchStore
-                    val typeOk = if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) true
-                    else {
-                        val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
-                        kws.isEmpty() || kws.any { result.allTextCombined.contains(it, ignoreCase = true) }
-                    }
-                    if (storeOk && typeOk) {
-                        result.matchFound = true
-                    }
+            val distMatches = DISTANCE_REGEX.findAll(combined).toList()
+            if (distMatches.isNotEmpty()) {
+                val currentMaxDist = distMatches.maxOfOrNull {
+                    it.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 0.0
+                } ?: 0.0
+                // Guardamos la máxima distancia hallada en toda la orden (total distancia de entrega)
+                if (result.matchDistance == 999.0 || currentMaxDist > result.matchDistance) {
+                    result.matchDistance = currentMaxDist
                 }
             }
+
+            val storeMatch = STORE_REGEX.find(combined)?.groupValues?.get(1)
+            if (storeMatch != null) result.matchStore = storeMatch
 
             // ── Detectar botón Accept/Aceptar (Verificando Clickable) ──
             if (result.acceptNode == null) {
@@ -414,7 +415,6 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         }
 
         for (i in 0 until node.childCount) {
-            if (result.matchFound && result.acceptNode != null) break // VERDADERO EARLY EXIT
             val child = node.getChild(i)
             if (child != null) {
                 collectNodes(child, result, depth + 1)
