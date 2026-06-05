@@ -15,7 +15,7 @@ class BotFilters {
     this.orderTypes = const ['Compras', 'Recolección'],
     this.speedMultiplier = 1.5,
     int? scanSpeed,
-  })  : storeCode = (storeCode != null && storeCode.length > 6) ? storeCode.substring(0, 6) : storeCode,
+  })  : storeCode = storeCode,
         maxDistance = maxDistance > 100.0 ? 100.0 : (maxDistance < 1.0 ? 1.0 : maxDistance),
         minPay = minPay < 13.0 ? 13.0 : (minPay > 150.0 ? 150.0 : minPay),
         maxPay = maxPay > 150.0 ? 150.0 : (maxPay < minPay ? minPay : maxPay),

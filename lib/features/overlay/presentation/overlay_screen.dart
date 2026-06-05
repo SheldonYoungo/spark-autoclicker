@@ -275,7 +275,8 @@ class _OverlayScreenState extends State<OverlayScreen> {
               valueListenable: _filterService.filtersNotifier,
               builder: (context, filters, _) {
                 final String storeDisplay = filters.storeCode?.isNotEmpty == true 
-                    ? '#${filters.storeCode}' : 'TODAS';
+                    ? (filters.storeCode!.contains(',') ? '${filters.storeCode!.split(',').length} tnd' : '#${filters.storeCode}') 
+                    : 'FALTA';
                 
                 String typesDisplay = 'TODAS';
                 if (filters.orderTypes.isNotEmpty) {

@@ -101,8 +101,8 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
   }
 
   void _showStoreModal(String? currentVal) {
-    final TextEditingController controller =
-        TextEditingController(text: currentVal ?? '');
+    final List<String> validStores = (currentVal ?? '').split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    final TextEditingController inputController = TextEditingController();
     final ValueNotifier<bool> errorNotifier = ValueNotifier<bool>(false);
         
     showModalBottomSheet(
@@ -111,55 +111,122 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: _StyledModalContainer(
-          title: 'Código de Tienda',
-          subtitle: 'Ingresa los 4 dígitos de la tienda Walmart (ej: 7178)',
-          hasErrorNotifier: errorNotifier,
-          onSave: () async {
-            final val = controller.text.trim();
-            if (val.length != 4) {
-              errorNotifier.value = true;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('⚠️ Debes ingresar exactamente 4 dígitos.'),
-                  backgroundColor: Colors.redAccent,
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-              await Future.delayed(const Duration(milliseconds: 600));
-              errorNotifier.value = false;
-              return;
-            }
-            _filterService.saveFilters(
-                _filterService.filtersNotifier.value.copyWith(storeCode: val));
-            Navigator.pop(context);
-          },
-          child: TextField(
-            controller: controller,
-            autofocus: true,
-            keyboardType: TextInputType.number,
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(4),
-            ],
-            style: const TextStyle(
-                color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-            decoration: InputDecoration(
-              prefixText: '#',
-              prefixStyle:
-                  const TextStyle(color: AppColors.primarySpark, fontSize: 24),
-              filled: true,
-              fillColor: Colors.white.withValues(alpha: 0.05),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide.none),
-              hintText: '0000',
-              hintStyle: const TextStyle(color: Colors.white24),
-            ),
-          ),
+      builder: (context) => _KeyboardPadding(
+        child: StatefulBuilder(
+          builder: (context, setModalState) {
+            return _StyledModalContainer(
+              title: 'Códigos de Tienda',
+              subtitle: 'Ingresa 4 dígitos y presiona + para agregar',
+              hasErrorNotifier: errorNotifier,
+              onSave: () async {
+                final val = inputController.text.trim();
+                if (val.isNotEmpty) {
+                  if (val.length != 4) {
+                    errorNotifier.value = true;
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('⚠️ El código debe tener exactamente 4 dígitos.'),
+                      backgroundColor: Colors.redAccent,
+                      behavior: SnackBarBehavior.floating,
+                    ));
+                    await Future.delayed(const Duration(milliseconds: 600));
+                    errorNotifier.value = false;
+                    return;
+                  }
+                  if (!validStores.contains(val)) validStores.add(val);
+                }
+                
+                final finalString = validStores.join(',');
+                _filterService.saveFilters(
+                    _filterService.filtersNotifier.value.copyWith(storeCode: finalString));
+                Navigator.pop(context);
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (validStores.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16.0),
+                      child: Wrap(
+                        spacing: 8.0,
+                        runSpacing: 8.0,
+                        children: validStores.map((store) {
+                          return Chip(
+                            label: Text('#$store', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            backgroundColor: AppColors.primarySpark.withValues(alpha: 0.2),
+                            deleteIconColor: Colors.redAccent,
+                            side: BorderSide(color: AppColors.primarySpark.withValues(alpha: 0.5)),
+                            onDeleted: () {
+                              setModalState(() {
+                                validStores.remove(store);
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: inputController,
+                          autofocus: false,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(4),
+                          ],
+                          style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                          decoration: InputDecoration(
+                            prefixText: '#',
+                            prefixStyle: const TextStyle(color: AppColors.primarySpark, fontSize: 24),
+                            filled: true,
+                            fillColor: Colors.white.withValues(alpha: 0.05),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+                            hintText: '0000',
+                            hintStyle: const TextStyle(color: Colors.white24),
+                          ),
+                          onSubmitted: (val) {
+                            if (val.length == 4 && !validStores.contains(val)) {
+                              setModalState(() {
+                                validStores.add(val);
+                                inputController.clear();
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.primarySpark.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.add, color: AppColors.primarySpark, size: 28),
+                          onPressed: () {
+                            final val = inputController.text.trim();
+                            if (val.length == 4 && !validStores.contains(val)) {
+                              setModalState(() {
+                                validStores.add(val);
+                                inputController.clear();
+                              });
+                            } else if (val.length > 0 && val.length < 4) {
+                               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                content: Text('El código debe tener 4 dígitos'),
+                                backgroundColor: Colors.redAccent,
+                                duration: Duration(seconds: 1),
+                              ));
+                            }
+                          },
+                        ),
+                      )
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }
         ),
       ),
     );
@@ -618,7 +685,7 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                         FilterCard(
                           title: 'Tienda Walmart',
                           value: filters.storeCode != null && filters.storeCode!.isNotEmpty
-                              ? '#${filters.storeCode}'
+                              ? (filters.storeCode!.contains(',') ? '${filters.storeCode!.split(',').length} tiendas' : '#${filters.storeCode}')
                               : 'FALTA',
                           icon: Icons.storefront_outlined,
                           accentColor: (filters.storeCode == null || filters.storeCode!.isEmpty) ? Colors.redAccent : AppColors.secondaryCian,
@@ -1104,6 +1171,19 @@ class _StyledModalContainer extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _KeyboardPadding extends StatelessWidget {
+  final Widget child;
+  const _KeyboardPadding({required this.child});
+  
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: child,
     );
   }
 }
