@@ -28,11 +28,17 @@ class NtpService {
 
     RawDatagramSocket? socket;
     try {
-      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
       final addresses = await InternetAddress.lookup(server);
       if (addresses.isEmpty) throw Exception('Address not found');
       
       final InternetAddress address = addresses.first;
+      socket = await RawDatagramSocket.bind(
+        address.type == InternetAddressType.IPv6 
+            ? InternetAddress.anyIPv6 
+            : InternetAddress.anyIPv4, 
+        0
+      );
+      
       socket.send(ntpData, address, 123);
       
       final Completer<DateTime> completer = Completer<DateTime>();
@@ -54,7 +60,7 @@ class NtpService {
         if (!completer.isCompleted) completer.completeError(e);
       });
 
-      return await completer.future.timeout(const Duration(milliseconds: 1500));
+      return await completer.future.timeout(const Duration(milliseconds: 5000));
     } finally {
       socket?.close();
     }

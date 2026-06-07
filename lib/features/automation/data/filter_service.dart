@@ -148,8 +148,18 @@ class FilterService {
 
       final int? expirationTs = prefs.getInt(_keyExpiration);
       if (expirationTs == null || prefs.getString(_keyStatus) != 'active') return false;
-      final DateTime networkTime = await NtpService.getNetworkTime();
-      return networkTime.isBefore(DateTime.fromMillisecondsSinceEpoch(expirationTs));
+      
+      DateTime now;
+      try {
+        debugPrint("FilterService: [${isMainIsolate ? 'Main' : 'Overlay'}] Obteniendo tiempo de red...");
+        now = await NtpService.getNetworkTime();
+      } catch (e) {
+        // Fallback: si NTP falla (datos móviles lentos), usar hora local como contingencia
+        debugPrint("FilterService: NTP falló ($e). Usando hora local como fallback.");
+        now = DateTime.now();
+      }
+      
+      return now.isBefore(DateTime.fromMillisecondsSinceEpoch(expirationTs));
     } catch (e) { return false; }
   }
 

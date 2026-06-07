@@ -29,6 +29,7 @@ class _BotMainScreenState extends State<BotMainScreen>
   StreamSubscription? _overlaySubscription;
   Timer? _ticker;
   bool _isAdmin = false;
+  bool _isActivating = false;
 
   @override
   void initState() {
@@ -927,7 +928,7 @@ class _BotMainScreenState extends State<BotMainScreen>
       valueListenable: _filterService.isBotActiveNotifier,
       builder: (context, isActive, _) {
         return GestureDetector(
-          onTap: () {
+          onTap: _isActivating ? null : () async {
             if (!isActive &&
                 (filters.storeCode == null || filters.storeCode!.isEmpty)) {
               ScaffoldMessenger.of(context).showSnackBar(
@@ -940,7 +941,14 @@ class _BotMainScreenState extends State<BotMainScreen>
               );
               return;
             }
-            _filterService.toggleBot(!isActive);
+            if (mounted) setState(() => _isActivating = true);
+            try {
+              await _filterService.toggleBot(!isActive);
+            } catch (e) {
+              debugPrint("BotMainScreen: Error en toggleBot: $e");
+            } finally {
+              if (mounted) setState(() => _isActivating = false);
+            }
           },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 300),
@@ -992,16 +1000,28 @@ class _BotMainScreenState extends State<BotMainScreen>
                       ),
                       child: Row(
                         children: [
-                          Icon(
-                            isActive ? Icons.pause : Icons.play_arrow,
-                            color: isActive
-                                ? Colors.white
-                                : AppColors.primarySpark,
-                            size: 16,
-                          ),
+                          if (_isActivating)
+                            SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.primarySpark,
+                              ),
+                            )
+                          else
+                            Icon(
+                              isActive ? Icons.pause : Icons.play_arrow,
+                              color: isActive
+                                  ? Colors.white
+                                  : AppColors.primarySpark,
+                              size: 16,
+                            ),
                           const SizedBox(width: 4),
                           Text(
-                            isActive ? 'DETENER BOT' : 'ACTIVAR BOT',
+                            _isActivating
+                                ? 'VALIDANDO...'
+                                : (isActive ? 'DETENER BOT' : 'ACTIVAR BOT'),
                             style: GoogleFonts.inter(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w900,
