@@ -15,6 +15,7 @@ import 'widgets/help_menu_modal.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 class BotMainScreen extends StatefulWidget {
   const BotMainScreen({super.key});
 
@@ -22,7 +23,8 @@ class BotMainScreen extends StatefulWidget {
   State<BotMainScreen> createState() => _BotMainScreenState();
 }
 
-class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserver {
+class _BotMainScreenState extends State<BotMainScreen>
+    with WidgetsBindingObserver {
   final FilterService _filterService = FilterService();
   StreamSubscription? _overlaySubscription;
   Timer? _ticker;
@@ -55,7 +57,8 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      debugPrint("BotMainScreen: App RESUMED -> Forzando sincronización con SharedPreferences");
+      debugPrint(
+          "BotMainScreen: App RESUMED -> Forzando sincronización con SharedPreferences");
       _filterService.loadFilters(forceReload: true);
     }
   }
@@ -70,7 +73,8 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
   }
 
   void _onBotActiveChanged() {
-    debugPrint("BotMainScreen: ⚡ isBotActiveNotifier CAMBIÓ -> ${_filterService.isBotActiveNotifier.value}");
+    debugPrint(
+        "BotMainScreen: ⚡ isBotActiveNotifier CAMBIÓ -> ${_filterService.isBotActiveNotifier.value}");
     if (mounted) setState(() {});
   }
 
@@ -101,10 +105,15 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
   }
 
   void _showStoreModal(String? currentVal) {
-    final List<String> validStores = (currentVal ?? '').split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    final List<String> validStores = (currentVal ?? '')
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
     final TextEditingController inputController = TextEditingController();
     final ValueNotifier<bool> errorNotifier = ValueNotifier<bool>(false);
-        
+    String? localError;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.background,
@@ -112,124 +121,194 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
       builder: (context) => _KeyboardPadding(
-        child: StatefulBuilder(
-          builder: (context, setModalState) {
-            return _StyledModalContainer(
-              title: 'Códigos de Tienda',
-              subtitle: 'Ingresa 4 dígitos y presiona + para agregar',
-              hasErrorNotifier: errorNotifier,
-              onSave: () async {
-                final val = inputController.text.trim();
-                if (val.isNotEmpty) {
-                  if (val.length != 4) {
-                    errorNotifier.value = true;
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text('⚠️ El código debe tener exactamente 4 dígitos.'),
-                      backgroundColor: Colors.redAccent,
-                      behavior: SnackBarBehavior.floating,
-                    ));
-                    await Future.delayed(const Duration(milliseconds: 600));
-                    errorNotifier.value = false;
-                    return;
+        child: StatefulBuilder(builder: (context, setModalState) {
+          return _StyledModalContainer(
+            title: 'Códigos de Tienda',
+            subtitle: 'Ingresa 4 dígitos y presiona + para agregar',
+            hasErrorNotifier: errorNotifier,
+            onSave: () async {
+              final val = inputController.text.trim();
+              if (val.isNotEmpty) {
+                if (val.length != 4) {
+                  setModalState(() {
+                    localError = '⚠️ El código debe tener exactamente 4 dígitos.';
+                  });
+                  errorNotifier.value = true;
+                  await Future.delayed(const Duration(milliseconds: 1000));
+                  errorNotifier.value = false;
+                  if (context.mounted) {
+                    setModalState(() { localError = null; });
                   }
-                  if (!validStores.contains(val)) validStores.add(val);
+                  return;
                 }
-                
-                final finalString = validStores.join(',');
-                _filterService.saveFilters(
-                    _filterService.filtersNotifier.value.copyWith(storeCode: finalString));
-                Navigator.pop(context);
-              },
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (validStores.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 16.0),
-                      child: Wrap(
-                        spacing: 8.0,
-                        runSpacing: 8.0,
-                        children: validStores.map((store) {
-                          return Chip(
-                            label: Text('#$store', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                            backgroundColor: AppColors.primarySpark.withValues(alpha: 0.2),
-                            deleteIconColor: Colors.redAccent,
-                            side: BorderSide(color: AppColors.primarySpark.withValues(alpha: 0.5)),
-                            onDeleted: () {
+                if (validStores.length < 3) {
+                  if (validStores.contains(val)) {
+                    inputController.clear();
+                  } else {
+                    validStores.add(val);
+                  }
+                }
+              }
+
+              Navigator.pop(context);
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (validStores.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16.0),
+                    child: Wrap(
+                      spacing: 8.0,
+                      runSpacing: 8.0,
+                      children: validStores.map((store) {
+                        return Chip(
+                          label: Text('#$store',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold)),
+                          backgroundColor:
+                              AppColors.primarySpark.withValues(alpha: 0.2),
+                          deleteIconColor: Colors.redAccent,
+                          side: BorderSide(
+                              color: AppColors.primarySpark
+                                  .withValues(alpha: 0.5)),
+                          onDeleted: () {
+                            setModalState(() {
+                              validStores.remove(store);
+                              localError = null;
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                if (localError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: Text(localError!, style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: inputController,
+                        enabled: validStores.length < 3,
+                        autofocus: false,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(4),
+                        ],
+                        style: TextStyle(
+                            color: validStores.length < 3
+                                ? Colors.white
+                                : Colors.white54,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                        decoration: InputDecoration(
+                          prefixText: '#',
+                          prefixStyle: TextStyle(
+                              color: validStores.length < 3
+                                  ? AppColors.primarySpark
+                                  : Colors.grey,
+                              fontSize: 24),
+                          filled: true,
+                          fillColor: Colors.white.withValues(alpha: 0.05),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              borderSide: BorderSide.none),
+                          hintText: validStores.length < 3
+                              ? '0000'
+                              : 'Límite',
+                          hintStyle: const TextStyle(color: Colors.white24),
+                        ),
+                        onSubmitted: (val) {
+                          if (val.length == 4) {
+                            if (validStores.contains(val)) {
                               setModalState(() {
-                                validStores.remove(store);
+                                localError = '⚠️ La tienda #$val ya está en la lista';
                               });
-                            },
-                          );
-                        }).toList(),
+                              inputController.clear();
+                              Future.delayed(const Duration(seconds: 2), () {
+                                if (context.mounted) {
+                                  setModalState(() { localError = null; });
+                                }
+                              });
+                              return;
+                            }
+                            if (validStores.length < 3) {
+                              setModalState(() {
+                                localError = null;
+                                validStores.add(val);
+                                inputController.clear();
+                              });
+                            }
+                          }
+                        },
                       ),
                     ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: inputController,
-                          autofocus: false,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                            LengthLimitingTextInputFormatter(4),
-                          ],
-                          style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
-                          textAlign: TextAlign.center,
-                          decoration: InputDecoration(
-                            prefixText: '#',
-                            prefixStyle: const TextStyle(color: AppColors.primarySpark, fontSize: 24),
-                            filled: true,
-                            fillColor: Colors.white.withValues(alpha: 0.05),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
-                            hintText: '0000',
-                            hintStyle: const TextStyle(color: Colors.white24),
-                          ),
-                          onSubmitted: (val) {
-                            if (val.length == 4 && !validStores.contains(val)) {
-                              setModalState(() {
-                                validStores.add(val);
-                                inputController.clear();
-                              });
-                            }
-                          },
-                        ),
+                    const SizedBox(width: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: validStores.length < 3
+                            ? AppColors.primarySpark.withValues(alpha: 0.1)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      const SizedBox(width: 8),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.primarySpark.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: IconButton(
-                          icon: const Icon(Icons.add, color: AppColors.primarySpark, size: 28),
-                          onPressed: () {
-                            final val = inputController.text.trim();
-                            if (val.length == 4 && !validStores.contains(val)) {
-                              setModalState(() {
-                                validStores.add(val);
-                                inputController.clear();
-                              });
-                            } else if (val.length > 0 && val.length < 4) {
-                               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                                content: Text('El código debe tener 4 dígitos'),
-                                backgroundColor: Colors.redAccent,
-                                duration: Duration(seconds: 1),
-                              ));
-                            }
-                          },
-                        ),
-                      )
-                    ],
-                  ),
-                ],
-              ),
-            );
-          }
-        ),
+                      child: IconButton(
+                        icon: Icon(Icons.add,
+                            color: validStores.length < 3
+                                ? AppColors.primarySpark
+                                : Colors.grey,
+                            size: 28),
+                        onPressed: validStores.length >= 3
+                            ? null
+                            : () {
+                                final val = inputController.text.trim();
+                                if (val.length == 4) {
+                                  if (validStores.contains(val)) {
+                                    setModalState(() {
+                                      localError = '⚠️ La tienda #$val ya está en la lista';
+                                    });
+                                    inputController.clear();
+                                    Future.delayed(const Duration(seconds: 2), () {
+                                      if (context.mounted) {
+                                        setModalState(() { localError = null; });
+                                      }
+                                    });
+                                    return;
+                                  }
+                                  setModalState(() {
+                                    localError = null;
+                                    validStores.add(val);
+                                    inputController.clear();
+                                  });
+                                } else if (val.length > 0 && val.length < 4) {
+                                  setModalState(() {
+                                    localError = '⚠️ El código debe tener 4 dígitos';
+                                  });
+                                  Future.delayed(const Duration(seconds: 2), () {
+                                    if (context.mounted) {
+                                      setModalState(() { localError = null; });
+                                    }
+                                  });
+                                }
+                              },
+                      ),
+                    )
+                  ],
+                ),
+              ],
+            ),
+          );
+        }),
       ),
-    );
+    ).whenComplete(() {
+      final finalString = validStores.join(',');
+      _filterService.saveFilters(_filterService.filtersNotifier.value.copyWith(storeCode: finalString));
+    });
   }
 
   void _showDistanceModal(double currentVal) {
@@ -245,8 +324,6 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
           title: 'Distancia Máxima',
           subtitle: 'Radio máximo para aceptar órdenes',
           onSave: () {
-            _filterService.saveFilters(_filterService.filtersNotifier.value
-                .copyWith(maxDistance: tempVal));
             Navigator.pop(context);
           },
           child: Column(
@@ -282,7 +359,9 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
           ),
         ),
       ),
-    );
+    ).whenComplete(() {
+      _filterService.saveFilters(_filterService.filtersNotifier.value.copyWith(maxDistance: tempVal));
+    });
   }
 
   void _showPayModal(double currentVal) {
@@ -303,14 +382,9 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                 bottom: MediaQuery.of(context).viewInsets.bottom),
             child: _StyledModalContainer(
               title: 'Tarifa Mínima',
-              subtitle: 'Tarifa mínima aceptable por orden (Rango: \$13 - \$150)',
+              subtitle:
+                  'Tarifa mínima aceptable por orden (Rango: \$13 - \$150)',
               onSave: () {
-                double? p = double.tryParse(controller.text);
-                if (p == null || p < 13) p = 13;
-                if (p > 150) p = 150;
-
-                _filterService.saveFilters(
-                    _filterService.filtersNotifier.value.copyWith(minPay: p));
                 Navigator.pop(context);
               },
               child: Column(
@@ -337,9 +411,11 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                         child: TextField(
                           controller: controller,
                           autofocus: true,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
                           inputFormatters: [
-                            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                            FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*\.?\d{0,2}')),
                             _MinPayInputFormatter(min: 13, max: 150),
                           ],
                           style: const TextStyle(
@@ -407,7 +483,12 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
           );
         },
       ),
-    );
+    ).whenComplete(() {
+      double? p = double.tryParse(controller.text);
+      if (p == null || p < 13) p = 13;
+      if (p > 150) p = 150;
+      _filterService.saveFilters(_filterService.filtersNotifier.value.copyWith(minPay: p));
+    });
   }
 
   Widget _buildStepperButton(
@@ -457,8 +538,6 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
           title: 'Tipos de Orden',
           subtitle: 'Selecciona los textos exactos que el bot debe buscar',
           onSave: () {
-            _filterService.saveFilters(_filterService.filtersNotifier.value
-                .copyWith(orderTypes: tempTypes));
             Navigator.pop(context);
           },
           child: Column(
@@ -510,7 +589,9 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
           ),
         ),
       ),
-    );
+    ).whenComplete(() {
+      _filterService.saveFilters(_filterService.filtersNotifier.value.copyWith(orderTypes: tempTypes));
+    });
   }
 
   void _showStyledModal(
@@ -573,8 +654,8 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                             ),
                             const SizedBox(width: 12),
                             Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                 Text(
                                   'SPARK APP',
                                   style: GoogleFonts.inter(
@@ -585,7 +666,8 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                                   ),
                                 ),
                                 ValueListenableBuilder<DateTime?>(
-                                  valueListenable: ActivationService.expirationDateNotifier,
+                                  valueListenable:
+                                      ActivationService.expirationDateNotifier,
                                   builder: (context, expiration, _) {
                                     return Row(
                                       children: [
@@ -593,21 +675,25 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                                           width: 6,
                                           height: 6,
                                           decoration: BoxDecoration(
-                                            color: _isAdmin ? AppColors.secondaryCian : _getRemainingColor(expiration),
+                                            color: _isAdmin
+                                                ? AppColors.secondaryCian
+                                                : _getRemainingColor(
+                                                    expiration),
                                             shape: BoxShape.circle,
                                           ),
                                         ),
                                         const SizedBox(width: 4),
                                         Text(
-                                          _isAdmin 
-                                              ? 'Suscripción: Ilimitada' 
+                                          _isAdmin
+                                              ? 'Suscripción: Ilimitada'
                                               : 'Suscripción: ${_getRemainingTime(expiration)}',
                                           style: GoogleFonts.inter(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w600,
-                                            color: _isAdmin 
-                                                ? AppColors.secondaryCian 
-                                                : _getRemainingColor(expiration).withValues(alpha: 0.8),
+                                            color: _isAdmin
+                                                ? AppColors.secondaryCian
+                                                : _getRemainingColor(expiration)
+                                                    .withValues(alpha: 0.8),
                                           ),
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -623,39 +709,67 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                           children: [
                             if (_isAdmin)
                               IconButton(
-                                icon: const Icon(Icons.admin_panel_settings, color: Colors.orangeAccent),
+                                icon: const Icon(Icons.admin_panel_settings,
+                                    color: Colors.orangeAccent),
                                 onPressed: () => Navigator.push(
                                   context,
-                                  MaterialPageRoute(builder: (_) => const AdminDashboard()),
+                                  MaterialPageRoute(
+                                      builder: (_) => const AdminDashboard()),
                                 ),
                               ),
                             IconButton(
-                              icon: const Icon(Icons.help_outline, color: AppColors.secondaryCian),
+                              icon: const Icon(Icons.help_outline,
+                                  color: AppColors.secondaryCian),
                               onPressed: () => HelpMenuModal.show(context),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.logout, color: Colors.white54, size: 20),
+                              icon: const Icon(Icons.logout,
+                                  color: Colors.white54, size: 20),
                               onPressed: () async {
                                 final bool confirm = await showDialog(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    backgroundColor: AppColors.background,
-                                    title: const Text('Cerrar Sesión', style: TextStyle(color: Colors.white)),
-                                    content: const Text('¿Estás seguro de que deseas desvincular este dispositivo?', style: TextStyle(color: Colors.white70)),
-                                    actions: [
-                                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCELAR')),
-                                      TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('CERRAR SESIÓN', style: TextStyle(color: Colors.redAccent))),
-                                    ],
-                                  )
-                                ) ?? false;
+                                        context: context,
+                                        builder: (context) => AlertDialog(
+                                              backgroundColor:
+                                                  AppColors.background,
+                                              title: const Text('Cerrar Sesión',
+                                                  style: TextStyle(
+                                                      color: Colors.white)),
+                                              content: const Text(
+                                                  '¿Estás seguro de que deseas desvincular este dispositivo?',
+                                                  style: TextStyle(
+                                                      color: Colors.white70)),
+                                              actions: [
+                                                TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                            context, false),
+                                                    child:
+                                                        const Text('CANCELAR')),
+                                                TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                            context, true),
+                                                    child: const Text(
+                                                        'CERRAR SESIÓN',
+                                                        style: TextStyle(
+                                                            color: Colors
+                                                                .redAccent))),
+                                              ],
+                                            )) ??
+                                    false;
                                 if (confirm) {
                                   if (_isAdmin) {
-                                    final prefs = await SharedPreferences.getInstance();
+                                    final prefs =
+                                        await SharedPreferences.getInstance();
                                     await prefs.setBool('bypass_revoked', true);
-                                    await prefs.setBool('is_admin_device', false);
-                                    final deviceId = await ActivationService().getDeviceId();
+                                    await prefs.setBool(
+                                        'is_admin_device', false);
+                                    final deviceId =
+                                        await ActivationService().getDeviceId();
                                     try {
-                                      await FirebaseDatabase.instance.ref('config/admin_devices/$deviceId').remove();
+                                      await FirebaseDatabase.instance
+                                          .ref('config/admin_devices/$deviceId')
+                                          .remove();
                                     } catch (_) {}
                                     await FirebaseAuth.instance.signOut();
                                     AdminService.forceReloadNotifier.value++;
@@ -684,11 +798,17 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                       children: [
                         FilterCard(
                           title: 'Tienda Walmart',
-                          value: filters.storeCode != null && filters.storeCode!.isNotEmpty
-                              ? (filters.storeCode!.contains(',') ? '${filters.storeCode!.split(',').length} tiendas' : '#${filters.storeCode}')
+                          value: filters.storeCode != null &&
+                                  filters.storeCode!.isNotEmpty
+                              ? (filters.storeCode!.contains(',')
+                                  ? '${filters.storeCode!.split(',').length} tiendas'
+                                  : '#${filters.storeCode}')
                               : 'FALTA',
                           icon: Icons.storefront_outlined,
-                          accentColor: (filters.storeCode == null || filters.storeCode!.isEmpty) ? Colors.redAccent : AppColors.secondaryCian,
+                          accentColor: (filters.storeCode == null ||
+                                  filters.storeCode!.isEmpty)
+                              ? Colors.redAccent
+                              : AppColors.secondaryCian,
                           onTap: () => _showStoreModal(filters.storeCode),
                         ),
                         FilterCard(
@@ -777,12 +897,17 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                       child: TextButton.icon(
                         onPressed: () => Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const SandboxScreen()),
+                          MaterialPageRoute(
+                              builder: (_) => const SandboxScreen()),
                         ),
-                        icon: const Icon(Icons.bug_report_outlined, size: 16, color: Colors.white38),
+                        icon: const Icon(Icons.bug_report_outlined,
+                            size: 16, color: Colors.white38),
                         label: Text(
                           'MODO PRUEBAS (SANDBOX)',
-                          style: GoogleFonts.inter(fontSize: 12, color: Colors.white38, letterSpacing: 1),
+                          style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: Colors.white38,
+                              letterSpacing: 1),
                         ),
                       ),
                     ),
@@ -803,10 +928,12 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
       builder: (context, isActive, _) {
         return GestureDetector(
           onTap: () {
-            if (!isActive && (filters.storeCode == null || filters.storeCode!.isEmpty)) {
+            if (!isActive &&
+                (filters.storeCode == null || filters.storeCode!.isEmpty)) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('⚠️ Debes ingresar un Código de Tienda primero para activar el bot.'),
+                  content: Text(
+                      '⚠️ Debes ingresar un Código de Tienda primero para activar el bot.'),
                   backgroundColor: Colors.redAccent,
                   behavior: SnackBarBehavior.floating,
                 ),
@@ -839,7 +966,9 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
               ),
               boxShadow: [
                 BoxShadow(
-                  color: (isActive ? AppColors.primarySpark : const Color(0xFF0043AA))
+                  color: (isActive
+                          ? AppColors.primarySpark
+                          : const Color(0xFF0043AA))
                       .withValues(alpha: 0.3),
                   blurRadius: 25,
                   offset: const Offset(0, 10),
@@ -856,15 +985,18 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: (isActive ? Colors.white : AppColors.primarySpark)
-                            .withValues(alpha: 0.1),
+                        color:
+                            (isActive ? Colors.white : AppColors.primarySpark)
+                                .withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
                         children: [
                           Icon(
                             isActive ? Icons.pause : Icons.play_arrow,
-                            color: isActive ? Colors.white : AppColors.primarySpark,
+                            color: isActive
+                                ? Colors.white
+                                : AppColors.primarySpark,
                             size: 16,
                           ),
                           const SizedBox(width: 4),
@@ -909,8 +1041,8 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                 if (filters.orderTypes.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(8),
@@ -919,7 +1051,8 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                       'Tipo de orden: ${filters.orderTypes.join(" · ")}',
                       style: GoogleFonts.inter(
                           fontSize: 12,
-                          color: isActive ? Colors.white : AppColors.secondaryCian,
+                          color:
+                              isActive ? Colors.white : AppColors.secondaryCian,
                           fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -935,10 +1068,30 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
   void _showSpeedModal(double currentMultiplier) {
     double tempVal = currentMultiplier;
     final tiers = [
-      {'val': 1.0, 'label': 'Tortuga', 'desc': 'Escaneo normal (1s)', 'icon': Icons.hourglass_empty},
-      {'val': 1.5, 'label': 'Seguro', 'desc': 'Recomendado (500ms)', 'icon': Icons.check_circle_outline},
-      {'val': 2.0, 'label': 'Liebre', 'desc': 'Muy rápido (300ms)', 'icon': Icons.bolt},
-      {'val': 3.0, 'label': 'Extremo', 'desc': 'IA Máxima (100ms)', 'icon': Icons.whatshot},
+      {
+        'val': 1.0,
+        'label': 'Tortuga',
+        'desc': 'Escaneo normal (1s)',
+        'icon': Icons.hourglass_empty
+      },
+      {
+        'val': 1.5,
+        'label': 'Seguro',
+        'desc': 'Recomendado (500ms)',
+        'icon': Icons.check_circle_outline
+      },
+      {
+        'val': 2.0,
+        'label': 'Liebre',
+        'desc': 'Muy rápido (300ms)',
+        'icon': Icons.bolt
+      },
+      {
+        'val': 3.0,
+        'label': 'Extremo',
+        'desc': 'IA Máxima (100ms)',
+        'icon': Icons.whatshot
+      },
     ];
 
     showModalBottomSheet(
@@ -952,8 +1105,6 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
           title: 'Velocidad de Escaneo',
           subtitle: 'Ajusta qué tan rápido el bot revisa la pantalla',
           onSave: () {
-            _filterService.saveFilters(_filterService.filtersNotifier.value
-                .copyWith(speedMultiplier: tempVal));
             Navigator.pop(context);
           },
           child: Column(
@@ -963,32 +1114,48 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12.0),
                 child: InkWell(
-                  onTap: () => setModalState(() => tempVal = tier['val'] as double),
+                  onTap: () =>
+                      setModalState(() => tempVal = tier['val'] as double),
                   borderRadius: BorderRadius.circular(16),
                   child: Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
-                      color: isSelected ? AppColors.secondaryCian.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.03),
+                      color: isSelected
+                          ? AppColors.secondaryCian.withValues(alpha: 0.1)
+                          : Colors.white.withValues(alpha: 0.03),
                       border: Border.all(
-                        color: isSelected ? AppColors.secondaryCian : Colors.white.withValues(alpha: 0.05),
+                        color: isSelected
+                            ? AppColors.secondaryCian
+                            : Colors.white.withValues(alpha: 0.05),
                         width: isSelected ? 2 : 1,
                       ),
                     ),
                     child: Row(
                       children: [
-                        Icon(tier['icon'] as IconData, color: isSelected ? AppColors.secondaryCian : Colors.white38),
+                        Icon(tier['icon'] as IconData,
+                            color: isSelected
+                                ? AppColors.secondaryCian
+                                : Colors.white38),
                         const SizedBox(width: 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(tier['label'] as String, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                              Text(tier['desc'] as String, style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                              Text(tier['label'] as String,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16)),
+                              Text(tier['desc'] as String,
+                                  style: const TextStyle(
+                                      color: Colors.white38, fontSize: 12)),
                             ],
                           ),
                         ),
-                        if (isSelected) const Icon(Icons.check_circle, color: AppColors.secondaryCian),
+                        if (isSelected)
+                          const Icon(Icons.check_circle,
+                              color: AppColors.secondaryCian),
                       ],
                     ),
                   ),
@@ -998,13 +1165,17 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
           ),
         ),
       ),
-    );
+    ).whenComplete(() {
+      _filterService.saveFilters(_filterService.filtersNotifier.value.copyWith(speedMultiplier: tempVal));
+    });
   }
 
   Widget _buildSpeedBoostCard(BotFilters filters) {
     String label = 'Normal';
-    if (filters.speedMultiplier >= 3.0) label = 'Extremo';
-    else if (filters.speedMultiplier >= 2.0) label = 'Liebre';
+    if (filters.speedMultiplier >= 3.0)
+      label = 'Extremo';
+    else if (filters.speedMultiplier >= 2.0)
+      label = 'Liebre';
     else if (filters.speedMultiplier >= 1.5) label = 'Seguro';
 
     return GestureDetector(
@@ -1014,7 +1185,8 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
         decoration: BoxDecoration(
           color: const Color(0xFF0A1629),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: AppColors.borderBlue.withValues(alpha: 0.3)),
+          border:
+              Border.all(color: AppColors.borderBlue.withValues(alpha: 0.3)),
         ),
         child: Row(
           children: [
@@ -1046,7 +1218,8 @@ class _BotMainScreenState extends State<BotMainScreen> with WidgetsBindingObserv
                 ],
               ),
             ),
-            const Icon(Icons.arrow_forward_ios, color: Colors.white12, size: 16),
+            const Icon(Icons.arrow_forward_ios,
+                color: Colors.white12, size: 16),
           ],
         ),
       ),
@@ -1146,7 +1319,9 @@ class _StyledModalContainer extends StatelessWidget {
                     builder: (context, hasError, _) => ElevatedButton(
                       onPressed: onSave,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: hasError ? Colors.redAccent : AppColors.primarySpark,
+                        backgroundColor: hasError
+                            ? Colors.redAccent
+                            : AppColors.primarySpark,
                         foregroundColor: hasError ? Colors.white : Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 18),
                         shape: RoundedRectangleBorder(
@@ -1178,11 +1353,12 @@ class _StyledModalContainer extends StatelessWidget {
 class _KeyboardPadding extends StatelessWidget {
   final Widget child;
   const _KeyboardPadding({required this.child});
-  
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: child,
     );
   }

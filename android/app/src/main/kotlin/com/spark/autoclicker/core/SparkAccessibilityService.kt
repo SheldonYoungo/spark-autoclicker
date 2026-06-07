@@ -282,17 +282,17 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         for (kw in acceptKeywords) {
             val nodes = root.findAccessibilityNodeInfosByText(kw)
             if (nodes.isNotEmpty()) {
-                logToFlutter("🔍 Buscando '$kw': ${nodes.size} nodos encontrados.")
+                Log.d(TAG, "🔍 Buscando '$kw': ${nodes.size} nodos encontrados.")
                 val validNode = nodes.firstOrNull { node ->
                     val rect = Rect().also { node.getBoundsInScreen(it) }
-                    logToFlutter("   -> Evaluando nodo: bounds=$rect, className=${node.className}")
+                    Log.d(TAG, "   -> Evaluando nodo: bounds=$rect, className=${node.className}")
                     val isNotTooGiant = rect.width() < 2000 && rect.height() < 500
                     val hasBounds = !rect.isEmpty
                     isNotTooGiant && hasBounds
                 }
                 if (validNode != null) {
                     val finalRect = Rect().also { validNode.getBoundsInScreen(it) }
-                    logToFlutter("🔍 [Greedy Accept NATIVO] Botón '$kw' válido encontrado en bounds: $finalRect")
+                    Log.d(TAG, "🔍 [Greedy Accept NATIVO] Botón '$kw' válido encontrado en bounds: $finalRect")
                     
                     val nodeToClick = AccessibilityNodeInfo.obtain(validNode)
                     serviceScope.launch {
@@ -304,7 +304,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                     nodes.forEach { it.recycle() }
                     break
                 } else {
-                    logToFlutter("❌ Ningún nodo de '$kw' pasó la validación de tamaño/bounds.")
+                    Log.d(TAG, "❌ Ningún nodo de '$kw' pasó la validación de tamaño/bounds.")
                     nodes.forEach { it.recycle() }
                 }
             }
@@ -312,11 +312,11 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         
         // Fallback: Búsqueda manual recursiva (Flutter a veces oculta el texto a la API nativa de Android)
         if (!clicked) {
-            logToFlutter("⚠️ La búsqueda nativa falló. Intentando búsqueda manual recursiva...")
+            Log.d(TAG, "⚠️ La búsqueda nativa falló. Intentando búsqueda manual recursiva...")
             val manualNode = findAcceptNodeManually(root)
             if (manualNode != null) {
                 val finalRect = Rect().also { manualNode.getBoundsInScreen(it) }
-                logToFlutter("🔍 [Greedy Accept MANUAL] Botón encontrado en bounds: $finalRect")
+                Log.d(TAG, "🔍 [Greedy Accept MANUAL] Botón encontrado en bounds: $finalRect")
                 serviceScope.launch {
                     val result = clickNode(manualNode, finalRect)
                     manualNode.recycle()
@@ -324,7 +324,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 }
                 clicked = true
             } else {
-                logToFlutter("❌ La búsqueda manual también falló. No se encontró el botón Accept en la pantalla.")
+                Log.d(TAG, "❌ La búsqueda manual también falló. No se encontró el botón Accept en la pantalla.")
             }
         }
         
@@ -360,9 +360,6 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         return null
     }
 
-    /**
-     * Ejecuta clic en un nodo priorizando Gesto (bypass anti-bot) o escalando.
-     */
     private suspend fun clickNode(node: AccessibilityNodeInfo, fallbackRect: Rect?): Boolean {
         return withContext(Dispatchers.Main) {
             lastClickTime = System.currentTimeMillis()
@@ -371,7 +368,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             
             // Intento 1: PRIORIDAD GESTO EN COORDENADAS (Evita falsos positivos de ACTION_CLICK)
             if (!rect.isEmpty) {
-                logToFlutter("🎯 Intentando Gesto en coordenadas: $rect")
+                Log.d(TAG, "🎯 Intentando Gesto en coordenadas: $rect")
                 val gestureOk = clickAt(rect)
                 if (gestureOk) return@withContext true
             }
@@ -379,7 +376,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             // Intento 2: clic directo (Fallback)
             if (node.isClickable) {
                 if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-                    logToFlutter("⚡ ACTION_CLICK directo OK")
+                    Log.d(TAG, "⚡ ACTION_CLICK directo OK")
                     return@withContext true
                 }
             }
@@ -392,7 +389,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                     val ok = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                     parent.recycle()
                     if (ok) {
-                        logToFlutter("⚡ ACTION_CLICK padre (d=$d) OK")
+                        Log.d(TAG, "⚡ ACTION_CLICK padre (d=$d) OK")
                         return@withContext true
                     }
                 }
@@ -434,11 +431,11 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         return suspendCoroutine { continuation ->
             val dispatched = dispatchGesture(gestureBuilder.build(), object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
-                    logToFlutter("⚡ Gesto completado (Jitter)")
+                    Log.d(TAG, "⚡ Gesto completado (Jitter)")
                     continuation.resume(true)
                 }
                 override fun onCancelled(gestureDescription: GestureDescription?) {
-                    logToFlutter("❌ Gesto cancelado")
+                    Log.d(TAG, "❌ Gesto cancelado")
                     continuation.resume(false)
                 }
             }, null)

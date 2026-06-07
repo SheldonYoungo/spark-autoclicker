@@ -56,7 +56,7 @@ class _SandboxScreenState extends State<SandboxScreen> {
   }
 
   String _currentOfferText =
-      'Monto: \$20.00\nDistancia: 10 miles\nStore #7178\nCompras';
+      'Monto: \$20.00\nDistancia: 10 miles\nStore #1234\nCompras';
 
   void _updateOffer(String price, String distance, String store,
       {String type = "Compras"}) {
@@ -200,19 +200,19 @@ class _SandboxScreenState extends State<SandboxScreen> {
                         alignment: WrapAlignment.center,
                         children: [
                           _offerButton(
-                              'Buena', '45.50', '2.1', '7178', Colors.green,
+                              'Buena', '45.50', '2.1', '1234', Colors.green,
                               type: "Compras"),
-                          _offerButton('Recolección', '25.00', '1.5', '7178',
+                          _offerButton('Recolección', '25.00', '1.5', '1234',
                               Colors.blue,
                               type: "Recolección"),
                           _offerButton(
-                              'Multiviaje', '35.00', '4.2', '7178', Colors.cyan,
+                              'Multiviaje', '35.00', '4.2', '1234', Colors.cyan,
                               type: "Multiviajes"),
                           _offerButton(
-                              'Barata', '12.00', '1.5', '7178', Colors.orange,
+                              'Barata', '12.00', '1.5', '1234', Colors.orange,
                               type: "Compras"),
                           _offerButton(
-                              'Lejos', '50.00', '12.5', '7178', Colors.red,
+                              'Lejos', '50.00', '12.5', '1234', Colors.red,
                               type: "Compras"),
                         ],
                       ),
@@ -238,7 +238,7 @@ class _SandboxScreenState extends State<SandboxScreen> {
                               isActive: true,
                               minPrice: 13.50,
                               maxDistance: 5.5,
-                              storeId: "7178",
+                              storeId: "1234",
                               orderType: "Compras,Recolección",
                               scanSpeed: 500,
                             );
@@ -246,10 +246,10 @@ class _SandboxScreenState extends State<SandboxScreen> {
                             setState(() {
                               _minPrice = 13.50;
                               _maxDistance = 5.5;
-                              _storeId = "7178";
+                              _storeId = "1234";
                               _orderType = "Compras,Recolección";
                               _logs.add(
-                                  ">>> CONFIGURACIÓN APLICADA: >\$13.50, <5.5mi, Tienda #7178, [Compras,Recolección]");
+                                  ">>> CONFIGURACIÓN APLICADA: >\$13.50, <5.5mi, Tienda #1234, [Compras,Recolección]");
                             });
                           },
                           style: ElevatedButton.styleFrom(
