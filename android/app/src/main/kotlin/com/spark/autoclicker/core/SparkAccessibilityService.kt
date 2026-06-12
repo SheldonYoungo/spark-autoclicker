@@ -23,9 +23,11 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 /**
- * Servicio de Accesibilidad para automatizar la captura de ofertas en Spark.
- * Cumple con latencia < 100ms y simulación de comportamiento humano (Jitter).
- * Implementa Arquitectura "SharedPreferences Source of Truth" para sincronización Isolate-Proof.
+ * Servicio de Accesibilidad para automatizar la captura de ofertas en Spark Driver.
+ * Acumula información de precios y distancias de TODOS los nodos visibles
+ * (Walmart separa precio y distancia en nodos distintos del árbol de accesibilidad).
+ *
+ * Arquitectura: collectNodes (DFS) -> processAllWindows (evaluación global) -> accept click.
  */
 class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSharedPreferenceChangeListener {
 
@@ -34,28 +36,33 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         private const val PREFS_NAME = "FlutterSharedPreferences"
         var instance: SparkAccessibilityService? = null
 
-        // Regex pre-compilados (se crean UNA sola vez, no en cada nodo)
         private val PRICE_REGEX = Regex("""\$\s*(\d+[\.,]\d+|\d+)""")
         private val DISTANCE_REGEX = Regex("""(\d+[\.,]\d+|\d+)\s*(?:mi|mile|miles|millas|m)\b""", RegexOption.IGNORE_CASE)
         private val STORE_REGEX = Regex("""#\s*(\d+)""")
     }
 
+    private data class ScanResult(
+        val price: Double = 0.0,
+        val distance: Double = 999.0,
+        val store: String? = null,
+        val allTextCombined: String = ""
+    )
+
     var isBotActive = false
         private set
-        
+
     private var minPrice = 0.0
     private var maxDistance = 99.9
     private var storeId = ""
-    private var orderType = "" 
-    
+    private var orderType = ""
+
     private var lastClickTime = 0L
-    private val clickDebounce = 500L 
-    
-    // Kept for backward compatibility with Flutter configs, but no longer blocks scanning.
-    private var scanSpeed = 500L 
+    private var lastScanTime = 0L
+    private val clickDebounce = 500L
+    private var scanSpeed = 300L
 
     private var prefs: SharedPreferences? = null
-    
+
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private val acceptKeywords = listOf(
@@ -64,9 +71,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
     private fun logToFlutter(message: String) {
         Log.d(TAG, message)
-        
-        // Filtrar logs para no saturar el hilo de UI en Flutter
-        val isCritical = message.startsWith("STATUS:") || 
+
+        val isCritical = message.startsWith("STATUS:") ||
                          message.startsWith("✅") ||
                          message.startsWith("🤖") ||
                          message.startsWith("🛑") ||
@@ -74,7 +80,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                          message.startsWith("🔍") ||
                          message.startsWith("⚡") ||
                          message.startsWith("💀")
-                         
+
         if (isCritical) {
             Handler(Looper.getMainLooper()).post {
                 try {
@@ -88,8 +94,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        
-        // Limitar el servicio a Spark y a nuestra propia app (para el Sandbox)
+
         try {
             val info = serviceInfo
             info.packageNames = arrayOf("com.walmart.spark.driver", "com.spark.autoclicker")
@@ -100,49 +105,44 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         }
 
         instance = this
-        
+
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs?.registerOnSharedPreferenceChangeListener(this)
-        
-        // Carga inicial
+
         syncWithPrefs()
-        
+
         logToFlutter("✅ Servicio de Accesibilidad Vinculado (Sync Nativa OK)")
     }
 
-    /**
-     * Listener SEGURO de SharedPreferences.
-     */
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
         if (key != "flutter.is_bot_active_state" && key != "flutter.bot_filters_config") return
-        
+
         val p = prefs ?: return
         val newActive = p.getBoolean("flutter.is_bot_active_state", false)
-        
-        // Solo actuar si el estado REALMENTE cambió
+
         if (newActive == isBotActive && key == "flutter.is_bot_active_state") {
             Log.d(TAG, "🔄 Prefs cambió ($key) pero estado idéntico ($newActive). Ignorando.")
             return
         }
-        
+
         Log.d(TAG, "🔄 Cambio detectado en Prefs: $key. isBotActive: $isBotActive -> $newActive")
         syncWithPrefs()
     }
 
     private fun syncWithPrefs() {
         val p = prefs ?: return
-        
+
         val active = p.getBoolean("flutter.is_bot_active_state", false)
         val filtersJson = p.getString("flutter.bot_filters_config", null)
-        
+
         if (filtersJson != null) {
             try {
                 val json = JSONObject(filtersJson)
                 val price = json.optDouble("minPay", 0.0)
                 val distance = json.optDouble("maxDistance", 99.0)
                 val store = json.optString("storeCode", "")
-                val speed = json.optInt("scanSpeed", 500)
-                
+                val speed = json.optInt("scanSpeed", 300)
+
                 val typesArray = json.optJSONArray("orderTypes")
                 val typesList = mutableListOf<String>()
                 if (typesArray != null) {
@@ -157,9 +157,9 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 Log.e(TAG, "Error parseando filtros JSON: ${e.message}")
             }
         } else {
-            updateConfig(active, 0.0, 99.0, "", "Any", 500)
+            updateConfig(active, 0.0, 99.0, "", "Any", 300)
         }
-        
+
         if (active) {
             logToFlutter("STATUS:ACTIVE")
         }
@@ -171,8 +171,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         maxDistance = distance
         storeId = store
         orderType = type
-        scanSpeed = speed.toLong()
-        
+        scanSpeed = if (speed > 0) speed.toLong() else 300L
+
         val statusText = if (active) "ON" else "OFF"
         logToFlutter("🤖 Motor Nativo: Sincronización Automática -> $statusText")
         Log.d(TAG, "⚙️ Config: MinPrice=$price, Distance=$distance, Store=$store, Type=$type, Speed=${scanSpeed}ms")
@@ -182,186 +182,176 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         if (!isBotActive) return
 
         val packageName = event.packageName?.toString() ?: return
-        
-        if (!(packageName.contains("walmart", ignoreCase = true) || 
+
+        if (!(packageName.contains("walmart", ignoreCase = true) ||
               packageName.contains("spark", ignoreCase = true) ||
               packageName == "com.spark.autoclicker")) {
             return
         }
 
         val currentTime = System.currentTimeMillis()
-        if (currentTime - lastClickTime < clickDebounce) return
+        if (currentTime - lastScanTime < scanSpeed) return
+        lastScanTime = currentTime
 
+        serviceScope.launch {
+            processAllWindows()
+        }
+    }
+
+    /**
+     * Procesa TODAS las ventanas visibles. Acumula ScanResults de cada nodo y evalúa
+     * la oferta de forma GLOBAL: precio de un nodo, distancia de otro (Walmart los separa).
+     */
+    private suspend fun processAllWindows() {
         val allRoots = mutableListOf<AccessibilityNodeInfo>()
         try {
             windows?.forEach { w -> w.root?.let { allRoots.add(it) } }
         } catch (_: Exception) {}
         if (allRoots.isEmpty()) rootInActiveWindow?.let { allRoots.add(it) }
-        
         if (allRoots.isEmpty()) return
 
+        var matchedRoot: AccessibilityNodeInfo? = null
         var offerFound = false
-        var targetRoot: AccessibilityNodeInfo? = null
 
-        // Evaluación síncrona, ventana por ventana, nodo por nodo
         for (root in allRoots) {
-            if (searchOfferInNode(root)) {
+            val results = mutableListOf<ScanResult>()
+            val allText = StringBuilder()
+            collectNodes(root, 0, 30, results, allText)
+
+            if (results.isEmpty()) continue
+
+            val hasValidPrice = results.any { it.price >= minPrice && it.price > 0 }
+            if (!hasValidPrice) continue
+
+            val hasValidDistance = results.any { it.distance <= maxDistance }
+            val combinedStore = results.firstOrNull { it.store != null }?.store
+            val storeOk = if (storeId.isEmpty()) {
+                true
+            } else {
+                val acceptedStores = storeId.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                acceptedStores.isEmpty() || (combinedStore != null && acceptedStores.contains(combinedStore))
+            }
+            val typeOk = if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) {
+                true
+            } else {
+                val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                kws.isEmpty() || kws.any { allText.contains(it, ignoreCase = true) }
+            }
+
+            if (hasValidPrice && hasValidDistance && storeOk && typeOk) {
                 offerFound = true
-                targetRoot = root
+                matchedRoot = root
                 break
             }
         }
 
-        if (offerFound && targetRoot != null) {
-            val rootToProcess = AccessibilityNodeInfo.obtain(targetRoot)
-            logToFlutter("🎯 Match de oferta encontrado. Aplicando Greedy Accept...")
-            greedyAccept(rootToProcess)
+        if (offerFound && matchedRoot != null) {
+            logToFlutter("🎯 Oferta válida encontrada. Buscando botón Accept...")
+            var clicked = false
+
+            // Intento 1: findAccessibilityNodeInfosByText (nativo, rápido)
+            for (kw in acceptKeywords) {
+                val nodes = matchedRoot.findAccessibilityNodeInfosByText(kw)
+                if (nodes.isNotEmpty()) {
+                    val validNode = nodes.firstOrNull { node ->
+                        val rect = Rect().also { node.getBoundsInScreen(it) }
+                        val isNotTooGiant = rect.width() < 2000 && rect.height() < 500
+                        !rect.isEmpty && isNotTooGiant
+                    }
+                    if (validNode != null) {
+                        val finalRect = Rect().also { validNode.getBoundsInScreen(it) }
+                        logToFlutter("🔍 Accept ('$kw') en: $finalRect")
+                        val nodeToClick = AccessibilityNodeInfo.obtain(validNode)
+                        val result = clickNode(nodeToClick, finalRect)
+                        nodeToClick.recycle()
+                        if (result) {
+                            logToFlutter("✅ ¡Accept completado!")
+                            clicked = true
+                        }
+                    }
+                    nodes.forEach { it.recycle() }
+                    if (clicked) break
+                }
+            }
+
+            // Intento 2: búsqueda manual recursiva (fallback para Flutter/React Native)
+            if (!clicked) {
+                logToFlutter("⚠️ Búsqueda nativa falló. Buscando manualmente...")
+                val manualNode = findAcceptNodeManually(matchedRoot)
+                if (manualNode != null) {
+                    val finalRect = Rect().also { manualNode.getBoundsInScreen(it) }
+                    logToFlutter("🔍 Accept (manual) en: $finalRect")
+                    val result = clickNode(manualNode, finalRect)
+                    manualNode.recycle()
+                    if (result) {
+                        logToFlutter("✅ ¡Accept completado!")
+                        clicked = true
+                    }
+                } else {
+                    logToFlutter("❌ No se encontró botón Accept en la pantalla")
+                }
+            }
+        } else {
+            Log.d(TAG, "⏳ No se encontraron ofertas válidas en este scan")
         }
 
-        // Liberar todos los roots obtenidos de allRoots
         allRoots.forEach { it.recycle() }
     }
 
     /**
-     * Recorrido recursivo que evalúa el texto de CADA NODO de forma independiente.
+     * DFS recursivo con depth limit. Acumula ScanResult por cada nodo que tenga texto.
+     * Esto permite evaluar precio y distancia aunque estén en nodos separados del árbol.
      */
-    private fun searchOfferInNode(node: AccessibilityNodeInfo?): Boolean {
-        if (node == null) return false
+    private fun collectNodes(
+        node: AccessibilityNodeInfo?,
+        depth: Int,
+        maxDepth: Int,
+        results: MutableList<ScanResult>,
+        allText: StringBuilder
+    ) {
+        if (node == null || depth > maxDepth) return
 
         val text = node.text?.toString() ?: ""
         val cd = node.contentDescription?.toString() ?: ""
         val combined = "$text $cd".trim()
 
         if (combined.isNotBlank()) {
-            val priceMatches = PRICE_REGEX.findAll(combined).toList()
-            val distMatches = DISTANCE_REGEX.findAll(combined).toList()
+            allText.append(combined).append(" ")
 
-            // Solo verificamos si encontramos precio en ESTE nodo
-            if (priceMatches.isNotEmpty()) {
-                val maxPrice = priceMatches.maxOfOrNull {
-                    it.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 0.0
-                } ?: 0.0
+            val price = PRICE_REGEX.find(combined)?.groupValues?.get(1)
+                ?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+            val distance = DISTANCE_REGEX.find(combined)?.groupValues?.get(1)
+                ?.replace(",", ".")?.toDoubleOrNull() ?: 999.0
+            val store = STORE_REGEX.find(combined)?.groupValues?.get(1)
 
-                // Si hay distancia, obtenemos la máxima. Si no hay, asignamos un valor alto para que no pase el filtro (por seguridad)
-                val maxDist = if (distMatches.isNotEmpty()) {
-                    distMatches.maxOfOrNull {
-                        it.groupValues[1].replace(",", ".").toDoubleOrNull() ?: 0.0
-                    } ?: 0.0
-                } else {
-                    999.0
-                }
-
-                if (maxPrice >= minPrice && maxPrice > 0 && maxDist <= maxDistance) {
-                    val currentStore = STORE_REGEX.find(combined)?.groupValues?.get(1)
-                    val storeOk = if (storeId.isEmpty()) {
-                        true
-                    } else {
-                        val acceptedStores = storeId.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                        acceptedStores.isEmpty() || (currentStore != null && acceptedStores.contains(currentStore))
-                    }
-                    
-                    val typeOk = if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) {
-                        true
-                    } else {
-                        val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
-                        kws.isEmpty() || kws.any { combined.contains(it, ignoreCase = true) }
-                    }
-
-                    if (storeOk && typeOk) {
-                        Log.d(TAG, "✅ Oferta detectada en nodo único: $$maxPrice, $maxDist mi. Texto: $combined")
-                        return true
-                    }
-                }
-            }
+            results.add(ScanResult(price, distance, store, combined))
         }
 
         for (i in 0 until node.childCount) {
-            val child = node.getChild(i)
-            val found = searchOfferInNode(child)
-            child?.recycle()
-            if (found) return true
+            val child = node.getChild(i) ?: continue
+            collectNodes(child, depth + 1, maxDepth, results, allText)
+            child.recycle()
         }
-
-        return false
-    }
-
-    /**
-     * Greedy Accept: Una vez hallada la oferta, busca a nivel del Root el botón "Accept" y le da clic lo más rápido posible.
-     */
-    private fun greedyAccept(root: AccessibilityNodeInfo) {
-        var clicked = false
-        for (kw in acceptKeywords) {
-            val nodes = root.findAccessibilityNodeInfosByText(kw)
-            if (nodes.isNotEmpty()) {
-                Log.d(TAG, "🔍 Buscando '$kw': ${nodes.size} nodos encontrados.")
-                val validNode = nodes.firstOrNull { node ->
-                    val rect = Rect().also { node.getBoundsInScreen(it) }
-                    Log.d(TAG, "   -> Evaluando nodo: bounds=$rect, className=${node.className}")
-                    val isNotTooGiant = rect.width() < 2000 && rect.height() < 500
-                    val hasBounds = !rect.isEmpty
-                    isNotTooGiant && hasBounds
-                }
-                if (validNode != null) {
-                    val finalRect = Rect().also { validNode.getBoundsInScreen(it) }
-                    Log.d(TAG, "🔍 [Greedy Accept NATIVO] Botón '$kw' válido encontrado en bounds: $finalRect")
-                    
-                    val nodeToClick = AccessibilityNodeInfo.obtain(validNode)
-                    serviceScope.launch {
-                        val result = clickNode(nodeToClick, finalRect)
-                        nodeToClick.recycle()
-                        if (result) logToFlutter("✅ ¡Greedy Accept completado!")
-                    }
-                    clicked = true
-                    nodes.forEach { it.recycle() }
-                    break
-                } else {
-                    Log.d(TAG, "❌ Ningún nodo de '$kw' pasó la validación de tamaño/bounds.")
-                    nodes.forEach { it.recycle() }
-                }
-            }
-        }
-        
-        // Fallback: Búsqueda manual recursiva (Flutter a veces oculta el texto a la API nativa de Android)
-        if (!clicked) {
-            Log.d(TAG, "⚠️ La búsqueda nativa falló. Intentando búsqueda manual recursiva...")
-            val manualNode = findAcceptNodeManually(root)
-            if (manualNode != null) {
-                val finalRect = Rect().also { manualNode.getBoundsInScreen(it) }
-                Log.d(TAG, "🔍 [Greedy Accept MANUAL] Botón encontrado en bounds: $finalRect")
-                serviceScope.launch {
-                    val result = clickNode(manualNode, finalRect)
-                    manualNode.recycle()
-                    if (result) logToFlutter("✅ ¡Greedy Accept completado!")
-                }
-                clicked = true
-            } else {
-                Log.d(TAG, "❌ La búsqueda manual también falló. No se encontró el botón Accept en la pantalla.")
-            }
-        }
-        
-        root.recycle()
     }
 
     private fun findAcceptNodeManually(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (node == null) return null
-        
+
         val text = node.text?.toString() ?: ""
         val cd = node.contentDescription?.toString() ?: ""
         val combined = "$text $cd".trim()
-        
+
         if (combined.isNotBlank() && acceptKeywords.any { combined.contains(it, ignoreCase = true) }) {
             val rect = Rect().also { node.getBoundsInScreen(it) }
             val isNotTooGiant = rect.width() < 2000 && rect.height() < 500
             if (!rect.isEmpty && isNotTooGiant) {
-                // Prioridad a nodos cliqueables o botones si es posible
                 if (node.isClickable || node.className?.toString()?.contains("Button", ignoreCase = true) == true) {
                     return AccessibilityNodeInfo.obtain(node)
                 }
-                // Si no, igual lo retornamos porque en Flutter a veces el semántico "button" es solo texto
                 return AccessibilityNodeInfo.obtain(node)
             }
         }
-        
+
         for (i in 0 until node.childCount) {
             val child = node.getChild(i)
             val found = findAcceptNodeManually(child)
@@ -376,15 +366,15 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             lastClickTime = System.currentTimeMillis()
 
             val rect = fallbackRect ?: Rect().also { node.getBoundsInScreen(it) }
-            
-            // Intento 1: PRIORIDAD GESTO EN COORDENADAS (Evita falsos positivos de ACTION_CLICK)
+
+            // Intento 1: gesto en coordenadas con Jitter (evita falsos positivos de ACTION_CLICK)
             if (!rect.isEmpty) {
                 Log.d(TAG, "🎯 Intentando Gesto en coordenadas: $rect")
                 val gestureOk = clickAt(rect)
                 if (gestureOk) return@withContext true
             }
 
-            // Intento 2: clic directo (Fallback)
+            // Intento 2: ACTION_CLICK directo
             if (node.isClickable) {
                 if (node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                     Log.d(TAG, "⚡ ACTION_CLICK directo OK")
@@ -392,7 +382,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 }
             }
 
-            // Intento 3: escalar a padres (Fallback)
+            // Intento 3: escalar a padres
             var parent = node.parent
             var d = 0
             while (parent != null && d < 10) {
@@ -424,7 +414,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         if (!isBotActive) return false
         val delayMs = Random.nextLong(10, 80)
         delay(delayMs)
-        
+
         if (!isBotActive) return false
         val width = rect.width()
         val height = rect.height()
@@ -450,7 +440,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                     continuation.resume(false)
                 }
             }, null)
-            
+
             if (!dispatched) {
                 continuation.resume(false)
             }
@@ -465,10 +455,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     override fun onDestroy() {
         super.onDestroy()
         prefs?.unregisterOnSharedPreferenceChangeListener(this)
-        // Marcar el bot como inactivo en SharedPrefs para evitar estado zombie
         prefs?.edit()?.putBoolean("flutter.is_bot_active_state", false)?.apply()
         logToFlutter("💀 Servicio destruido")
         instance = null
     }
 }
-
