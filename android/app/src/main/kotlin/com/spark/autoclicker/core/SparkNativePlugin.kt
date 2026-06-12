@@ -10,6 +10,9 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
+import android.os.Build
+import android.os.PowerManager
+import android.net.Uri
 
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -84,7 +87,7 @@ class SparkNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     override fun onMethodCall(call: MethodCall, result: Result) {
         when (call.method) {
             "isServiceEnabled" -> {
-                val enabled = SparkAccessibilityService.instance != null
+                val enabled = context?.let { isAccessibilityServiceEnabled(it) } ?: false
                 result.success(enabled)
             }
             "openSettings" -> {
@@ -93,6 +96,48 @@ class SparkNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     it.startActivity(intent)
                     result.success(true)
+                } ?: result.error("NO_CONTEXT", "Context is null", null)
+            }
+            "isIgnoringBatteryOptimizations" -> {
+                context?.let { ctx ->
+                    val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        result.success(pm.isIgnoringBatteryOptimizations(ctx.packageName))
+                    } else {
+                        result.success(true)
+                    }
+                } ?: result.error("NO_CONTEXT", "Context is null", null)
+            }
+            "requestIgnoreBatteryOptimizations" -> {
+                context?.let { ctx ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+                        if (!pm.isIgnoringBatteryOptimizations(ctx.packageName)) {
+                            try {
+                                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                    data = Uri.parse("package:${ctx.packageName}")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                ctx.startActivity(intent)
+                                result.success(true)
+                            } catch (e: Exception) {
+                                try {
+                                    val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    ctx.startActivity(intent)
+                                    result.success(false)
+                                } catch (ex: Exception) {
+                                    Log.e(TAG, "Error opening battery optimization settings: ${ex.message}")
+                                    result.error("BATTERY_SETTING_FAILED", ex.message, null)
+                                }
+                            }
+                        } else {
+                            result.success(true)
+                        }
+                    } else {
+                        result.success(true)
+                    }
                 } ?: result.error("NO_CONTEXT", "Context is null", null)
             }
             "updateBotConfiguration" -> {
@@ -147,5 +192,24 @@ class SparkNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 result.notImplemented()
             }
         }
+    }
+
+    private fun isAccessibilityServiceEnabled(context: Context): Boolean {
+        val serviceName = "${context.packageName}/com.spark.autoclicker.core.SparkAccessibilityService"
+        val enabledServices = Settings.Secure.getString(
+            context.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+        
+        // El formato de Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES es una cadena de nombres de componentes separados por dos puntos (e.g. package.name/service.name:other.package/other.service)
+        val colonSplitter = android.text.TextUtils.SimpleStringSplitter(':')
+        colonSplitter.setString(enabledServices)
+        while (colonSplitter.hasNext()) {
+            val componentName = colonSplitter.next()
+            if (componentName.equals(serviceName, ignoreCase = true)) {
+                return true
+            }
+        }
+        return false
     }
 }

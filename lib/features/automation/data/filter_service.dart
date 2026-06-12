@@ -139,27 +139,29 @@ class FilterService {
       await prefs.reload();
       
       bool isAdmin = prefs.getBool('is_admin_device') ?? false;
-      
-      if (isMainIsolate && !isAdmin) {
-        isAdmin = await AdminService().isCurrentDeviceAdmin();
-      }
+      final int? expirationTs = prefs.getInt(_keyExpiration);
+      final bool hasActiveDriverSession = expirationTs != null && prefs.getString(_keyStatus) == 'active';
       
       if (isAdmin) return true;
-
-      final int? expirationTs = prefs.getInt(_keyExpiration);
-      if (expirationTs == null || prefs.getString(_keyStatus) != 'active') return false;
+      
+      if (isMainIsolate && !hasActiveDriverSession) {
+        isAdmin = await AdminService().isCurrentDeviceAdmin();
+        if (isAdmin) return true;
+      }
+      
+      if (!hasActiveDriverSession) return false;
       
       DateTime now;
       try {
         debugPrint("FilterService: [${isMainIsolate ? 'Main' : 'Overlay'}] Obteniendo tiempo de red...");
         now = await NtpService.getNetworkTime();
       } catch (e) {
-        // Fallback: si NTP falla (datos móviles lentos), usar hora local como contingencia
+        // Fallback: si NTP falla (datos móviles lentos o sin internet), usar hora local como contingencia
         debugPrint("FilterService: NTP falló ($e). Usando hora local como fallback.");
         now = DateTime.now();
       }
       
-      return now.isBefore(DateTime.fromMillisecondsSinceEpoch(expirationTs));
+      return now.isBefore(DateTime.fromMillisecondsSinceEpoch(expirationTs!));
     } catch (e) { return false; }
   }
 

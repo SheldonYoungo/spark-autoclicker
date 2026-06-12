@@ -93,4 +93,26 @@ class AccessibilityUtil {
       debugPrint("Error sincronizando configuración del bot: $e");
     }
   }
+
+  /// Verifica si la app está exenta de la optimización de batería
+  static Future<bool> isIgnoringBatteryOptimizations() async {
+    try {
+      final bool ignored = await _channel.invokeMethod('isIgnoringBatteryOptimizations');
+      return ignored;
+    } catch (e) {
+      debugPrint("Error verificando optimización de batería: $e");
+      return true; // Ante error, asumimos true para no bloquear
+    }
+  }
+
+  /// Solicita excluir la app de la optimización de batería de Android
+  static Future<bool> requestIgnoreBatteryOptimizations() async {
+    try {
+      final bool result = await _channel.invokeMethod('requestIgnoreBatteryOptimizations');
+      return result;
+    } catch (e) {
+      debugPrint("Error solicitando ignorar optimización de batería: $e");
+      return false;
+    }
+  }
 }

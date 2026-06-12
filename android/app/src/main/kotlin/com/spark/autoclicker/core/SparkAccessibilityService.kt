@@ -88,6 +88,17 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        
+        // Limitar el servicio a Spark y a nuestra propia app (para el Sandbox)
+        try {
+            val info = serviceInfo
+            info.packageNames = arrayOf("com.walmart.spark.driver", "com.spark.autoclicker")
+            serviceInfo = info
+            Log.d(TAG, "📦 packageNames configurados para Accesibilidad")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error configurando packageNames: ${e.message}")
+        }
+
         instance = this
         
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -454,6 +465,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     override fun onDestroy() {
         super.onDestroy()
         prefs?.unregisterOnSharedPreferenceChangeListener(this)
+        // Marcar el bot como inactivo en SharedPrefs para evitar estado zombie
+        prefs?.edit()?.putBoolean("flutter.is_bot_active_state", false)?.apply()
         logToFlutter("💀 Servicio destruido")
         instance = null
     }

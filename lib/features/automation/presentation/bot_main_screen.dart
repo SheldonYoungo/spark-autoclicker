@@ -7,6 +7,7 @@ import 'package:spark_autoclicker/features/automation/presentation/sandbox_scree
 import 'package:spark_autoclicker/features/automation/presentation/widgets/filter_card.dart';
 import 'package:spark_autoclicker/features/automation/data/activation_service.dart';
 import '../../../core/utils/overlay_util.dart';
+import '../../../core/utils/accessibility_util.dart';
 import '../data/filter_service.dart';
 import '../domain/filter_model.dart';
 import '../../admin/data/admin_service.dart';
@@ -38,6 +39,11 @@ class _BotMainScreenState extends State<BotMainScreen>
     _filterService.loadFilters();
     _checkAdminStatus();
 
+    // Ejecutar verificación de optimización de batería después del primer frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkBatteryOptimizations();
+    });
+
     // Escuchar eventos del Overlay para sincronizar estado en tiempo real
     _overlaySubscription = _filterService.overlayEvents.listen((event) {
       debugPrint("BotMainScreen: Evento recibido del stream -> $event");
@@ -53,6 +59,68 @@ class _BotMainScreenState extends State<BotMainScreen>
     _ticker = Timer.periodic(const Duration(minutes: 1), (timer) {
       if (mounted) setState(() {});
     });
+  }
+
+  Future<void> _checkBatteryOptimizations() async {
+    try {
+      final isIgnoring = await AccessibilityUtil.isIgnoringBatteryOptimizations();
+      if (!isIgnoring) {
+        if (mounted) {
+          _showBatteryOptimizationWarning();
+        }
+      }
+    } catch (e) {
+      debugPrint("Error verificando optimización de batería: $e");
+    }
+  }
+
+  void _showBatteryOptimizationWarning() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      builder: (context) => _StyledModalContainer(
+        title: 'Optimización de Batería',
+        subtitle: 'Para evitar que Android desactive el bot cuando esté en segundo plano, te recomendamos excluir la aplicación de las optimizaciones de batería.',
+        buttonText: 'Configurar',
+        onSave: () async {
+          Navigator.pop(context);
+          await AccessibilityUtil.requestIgnoreBatteryOptimizations();
+        },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.battery_alert_rounded,
+              size: 72,
+              color: Colors.orangeAccent,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Estabilidad en segundo plano requerida',
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'En la siguiente pantalla, selecciona "Permitir" o "Sin Restricciones" para Spark App.',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: Colors.white54,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -1292,13 +1360,16 @@ class _StyledModalContainer extends StatelessWidget {
   final Widget child;
   final VoidCallback onSave;
   final ValueNotifier<bool>? hasErrorNotifier;
+  final String buttonText;
 
-  const _StyledModalContainer(
-      {required this.title,
-      required this.subtitle,
-      required this.child,
-      required this.onSave,
-      this.hasErrorNotifier});
+  const _StyledModalContainer({
+    required this.title,
+    required this.subtitle,
+    required this.child,
+    required this.onSave,
+    this.hasErrorNotifier,
+    this.buttonText = 'CONFIRMAR CAMBIOS',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1347,8 +1418,8 @@ class _StyledModalContainer extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16)),
                       ),
-                      child: const Text('CONFIRMAR CAMBIOS',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      child: Text(buttonText.toUpperCase(),
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
                     ),
                   )
                 : ElevatedButton(
@@ -1360,8 +1431,8 @@ class _StyledModalContainer extends StatelessWidget {
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16)),
                     ),
-                    child: const Text('CONFIRMAR CAMBIOS',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: Text(buttonText.toUpperCase(),
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
                   ),
           ),
         ],

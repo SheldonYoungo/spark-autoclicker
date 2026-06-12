@@ -101,6 +101,11 @@ class ActivationService {
       if (preUser.activationKey != key) {
         return 'La llave de activación es incorrecta.';
       }
+      
+      if (preUser.status == UserStatus.inactive) {
+        return 'Tu cuenta ha sido desactivada. Contacta al administrador.';
+      }
+
       if (await _isExpired(preUser.expirationDate)) {
         return 'Suscripción expirada o error de red (NTP).';
       }
@@ -113,6 +118,11 @@ class ActivationService {
 
         final Map<String, dynamic> data = Map<String, dynamic>.from(postData as Map);
         final user = UserModel.fromJson(data);
+
+        if (user.status == UserStatus.inactive) {
+          errorMsg = 'Tu cuenta ha sido desactivada. Contacta al administrador.';
+          return Transaction.abort();
+        }
 
         // Dispositivo ya registrado
         if (user.authorizedDeviceIds.contains(currentDeviceId)) {
@@ -170,6 +180,10 @@ class ActivationService {
       if (!userSnapshot.exists) return 'Error interno: Usuario no encontrado.';
 
       final user = UserModel.fromJson(Map<String, dynamic>.from(userSnapshot.value as Map));
+
+      if (user.status == UserStatus.inactive) {
+        return 'Tu cuenta ha sido desactivada. Contacta al administrador.';
+      }
 
       if (await _isExpired(user.expirationDate)) {
         return 'Suscripción expirada o error de red (NTP).';
