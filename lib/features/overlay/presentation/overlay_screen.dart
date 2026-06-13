@@ -98,18 +98,9 @@ class _OverlayScreenState extends State<OverlayScreen> {
     return Material(
       color: Colors.transparent,
       child: SizedBox.expand(
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 300),
-          transitionBuilder: (Widget child, Animation<double> animation) {
-            return FadeTransition(
-              opacity: animation,
-              child: ScaleTransition(scale: animation, child: child),
-            );
-          },
-          child: _isExpanded
-              ? _buildDraggablePanel()
-              : _buildFloatingBubble(),
-        ),
+        child: _isExpanded
+            ? _buildDraggablePanel()
+            : _buildFloatingBubble(),
       ),
     );
   }
@@ -240,10 +231,13 @@ class _OverlayScreenState extends State<OverlayScreen> {
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                   onPressed: () async {
-                    // 1. Rehabilitar drag y encoger ventana nativa primero
+                    // 1. Cambiar widget Flutter instantáneamente (panel → burbuja)
+                    if (mounted) setState(() => _isExpanded = false);
+                    
+                    // 2. Encoger ventana nativa y rehabilitar drag
                     await FlutterOverlayWindow.resizeOverlay(_collapsedSize, _collapsedSize, true);
                     
-                    // 2. Restaurar posición original
+                    // 3. Restaurar posición original
                     if (_originalPosition != null) {
                       try {
                         await FlutterOverlayWindow.moveOverlay(_originalPosition!);
@@ -252,9 +246,6 @@ class _OverlayScreenState extends State<OverlayScreen> {
                       }
                     }
                     _originalPosition = null;
-                    
-                    // 3. Ahora sí cambiar el widget Flutter (ventana ya es pequeña)
-                    if (mounted) setState(() => _isExpanded = false);
                   },
                 ),
               ],
