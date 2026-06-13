@@ -21,7 +21,6 @@ class _OverlayScreenState extends State<OverlayScreen> {
   StreamSubscription? _overlaySubscription;
   final FilterService _filterService = FilterService();
   OverlayPosition? _originalPosition;
-  bool _wasOnLeftSide = false;
 
   // Dimensiones del panel y burbuja (en dp)
   int get _panelWidth {
@@ -130,15 +129,16 @@ class _OverlayScreenState extends State<OverlayScreen> {
             debugPrint("OverlayPosition get falló: $e");
           }
 
-          // RIGHT gravity: x ≈ 0 = borde derecho, x >> 0 = borde izquierdo.
-          // Umbral de 50dp distingue lados de forma segura (el imán solo deja x=0 o x=screenW-bubble).
-          _wasOnLeftSide = _originalPosition != null && _originalPosition!.x > 50;
-
           // FIX: El plugin nativo dispara una animación al soltar el toque.
           // Esperamos 200ms para asegurar que el magnetismo termine.
           await Future.delayed(const Duration(milliseconds: 200));
 
-          // Deshabilitar el drag para el panel grande.
+          // 1. Cambiar widget Flutter PRIMERO (panel listo antes de resize)
+          if (mounted) {
+            setState(() => _isExpanded = true);
+          }
+
+          // 2. Ahora resize + move la ventana nativa
           await FlutterOverlayWindow.resizeOverlay(_panelWidth, _panelHeight, false);
           
           // Esperamos 50ms para que la vista nativa asimile el nuevo tamaño
@@ -159,10 +159,6 @@ class _OverlayScreenState extends State<OverlayScreen> {
             );
           } catch (e) {
             debugPrint("moveOverlay centrar panel falló: $e");
-          }
-
-          if (mounted) {
-            setState(() => _isExpanded = true);
           }
         },
         child: ValueListenableBuilder<bool>(
@@ -244,26 +240,21 @@ class _OverlayScreenState extends State<OverlayScreen> {
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                   onPressed: () async {
-                    if (mounted) setState(() => _isExpanded = false);
-                    await Future.delayed(const Duration(milliseconds: 50));
-                    // Rehabilitar drag para la burbuja
+                    // 1. Rehabilitar drag y encoger ventana nativa primero
                     await FlutterOverlayWindow.resizeOverlay(_collapsedSize, _collapsedSize, true);
                     
-                    // Restaurar burbuja a su posición original (X e Y)
+                    // 2. Restaurar posición original
                     if (_originalPosition != null) {
                       try {
-                        final screenW = _getScreenWidthDp();
-                        // LEFT edge = screenW - bubble. RIGHT edge = 0
-                        final destX = _wasOnLeftSide ? (screenW - _collapsedSize).round() : 0;
-                        await FlutterOverlayWindow.moveOverlay(
-                          OverlayPosition(destX.toDouble(), _originalPosition!.y),
-                        );
+                        await FlutterOverlayWindow.moveOverlay(_originalPosition!);
                       } catch (e) {
                         debugPrint("Error restaurando posición: $e");
                       }
                     }
                     _originalPosition = null;
-                    _wasOnLeftSide = false;
+                    
+                    // 3. Ahora sí cambiar el widget Flutter (ventana ya es pequeña)
+                    if (mounted) setState(() => _isExpanded = false);
                   },
                 ),
               ],
