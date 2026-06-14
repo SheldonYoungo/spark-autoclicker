@@ -57,9 +57,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     private var orderType = ""
 
     private var lastClickTime = 0L
-    private var lastScanTime = 0L
-    private val clickDebounce = 500L
-    private var scanSpeed = 300L
+    private val clickDebounce = 250L
 
     private var prefs: SharedPreferences? = null
 
@@ -94,15 +92,6 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-
-        try {
-            val info = serviceInfo
-            info.packageNames = arrayOf("com.walmart.spark.driver", "com.spark.autoclicker")
-            serviceInfo = info
-            Log.d(TAG, "📦 packageNames configurados para Accesibilidad")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error configurando packageNames: ${e.message}")
-        }
 
         instance = this
 
@@ -171,11 +160,10 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         maxDistance = distance
         storeId = store
         orderType = type
-        scanSpeed = if (speed > 0) speed.toLong() else 300L
 
         val statusText = if (active) "ON" else "OFF"
         logToFlutter("🤖 Motor Nativo: Sincronización Automática -> $statusText")
-        Log.d(TAG, "⚙️ Config: MinPrice=$price, Distance=$distance, Store=$store, Type=$type, Speed=${scanSpeed}ms")
+        Log.d(TAG, "⚙️ Config: MinPrice=$price, Distance=$distance, Store=$store, Type=$type")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -190,66 +178,83 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         }
 
         val currentTime = System.currentTimeMillis()
-        if (currentTime - lastScanTime < scanSpeed) return
-        lastScanTime = currentTime
+        if (currentTime - lastClickTime < clickDebounce) return
+
+        val roots = captureRootsOnUiThread()
+        if (roots.isEmpty()) return
 
         serviceScope.launch {
-            processAllWindows()
+            processAllWindows(roots)
+            roots.forEach { it.recycle() }
         }
     }
 
-    /**
-     * Procesa TODAS las ventanas visibles. Acumula ScanResults de cada nodo y evalúa
-     * la oferta de forma GLOBAL: precio de un nodo, distancia de otro (Walmart los separa).
-     */
-    private suspend fun processAllWindows() {
+    private fun captureRootsOnUiThread(): List<AccessibilityNodeInfo> {
         val allRoots = mutableListOf<AccessibilityNodeInfo>()
         try {
             windows?.forEach { w -> w.root?.let { allRoots.add(it) } }
         } catch (_: Exception) {}
         if (allRoots.isEmpty()) rootInActiveWindow?.let { allRoots.add(it) }
-        if (allRoots.isEmpty()) return
+        return allRoots
+    }
 
+    private suspend fun processAllWindows(roots: List<AccessibilityNodeInfo>) {
         var matchedRoot: AccessibilityNodeInfo? = null
         var offerFound = false
+        var matchedRootIsCard = false
+        var windowContextStore: String? = null
 
-        for (root in allRoots) {
+        for (root in roots) {
+            val pkg = root.packageName?.toString() ?: ""
+            if (!pkg.contains("walmart", ignoreCase = true)) continue
+
+            // Shallow scan for window-context store (headers, outside cards)
+            if (windowContextStore == null) {
+                val tempResults = mutableListOf<ScanResult>()
+                val tempText = StringBuilder()
+                collectNodes(root, 0, 8, tempResults, tempText)
+                windowContextStore = tempResults.firstOrNull { it.store != null }?.store
+            }
+
+            // Phase 1: Card isolation
+            val cards = findOfferCards(root)
+            if (cards.isNotEmpty()) {
+                for (card in cards) {
+                    if (evaluateCard(card, windowContextStore)) {
+                        offerFound = true
+                        matchedRoot = AccessibilityNodeInfo.obtain(card)
+                        matchedRootIsCard = true
+                        break
+                    }
+                }
+                cards.forEach { it.recycle() }
+                if (offerFound) break
+            }
+
+            // Phase 2: Fallback flat scan
             val results = mutableListOf<ScanResult>()
             val allText = StringBuilder()
             collectNodes(root, 0, 30, results, allText)
-
             if (results.isEmpty()) continue
 
             val hasValidPrice = results.any { it.price >= minPrice && it.price > 0 }
             if (!hasValidPrice) continue
-
             val hasValidDistance = results.any { it.distance <= maxDistance }
-            val combinedStore = results.firstOrNull { it.store != null }?.store
-            val storeOk = if (storeId.isEmpty()) {
-                true
-            } else {
-                val acceptedStores = storeId.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                acceptedStores.isEmpty() || (combinedStore != null && acceptedStores.contains(combinedStore))
-            }
-            val typeOk = if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) {
-                true
-            } else {
-                val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
-                kws.isEmpty() || kws.any { allText.contains(it, ignoreCase = true) }
-            }
+            if (!hasValidDistance) continue
 
-            if (hasValidPrice && hasValidDistance && storeOk && typeOk) {
-                offerFound = true
-                matchedRoot = root
-                break
-            }
+            val store = results.firstOrNull { it.store != null }?.store ?: windowContextStore
+            if (!storeMatches(store)) continue
+            if (!typeMatches(allText.toString())) continue
+
+            offerFound = true
+            matchedRoot = root
+            break
         }
 
         if (offerFound && matchedRoot != null) {
             logToFlutter("🎯 Oferta válida encontrada. Buscando botón Accept...")
             var clicked = false
 
-            // Intento 1: findAccessibilityNodeInfosByText (nativo, rápido)
             for (kw in acceptKeywords) {
                 val nodes = matchedRoot.findAccessibilityNodeInfosByText(kw)
                 if (nodes.isNotEmpty()) {
@@ -274,7 +279,6 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 }
             }
 
-            // Intento 2: búsqueda manual recursiva (fallback para Flutter/React Native)
             if (!clicked) {
                 logToFlutter("⚠️ Búsqueda nativa falló. Buscando manualmente...")
                 val manualNode = findAcceptNodeManually(matchedRoot)
@@ -295,7 +299,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             Log.d(TAG, "⏳ No se encontraron ofertas válidas en este scan")
         }
 
-        allRoots.forEach { it.recycle() }
+        for (root in roots) root.recycle()
+        if (matchedRootIsCard) matchedRoot?.recycle()
     }
 
     /**
@@ -332,6 +337,87 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             collectNodes(child, depth + 1, maxDepth, results, allText)
             child.recycle()
         }
+    }
+
+    private fun findOfferCards(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
+        val cards = mutableListOf<AccessibilityNodeInfo>()
+        val screenWidth = try {
+            resources.displayMetrics.widthPixels
+        } catch (e: Exception) { 1080 }
+        findCardContainers(root, cards, screenWidth, 0, 25)
+        return cards
+    }
+
+    private fun findCardContainers(
+        node: AccessibilityNodeInfo?,
+        cards: MutableList<AccessibilityNodeInfo>,
+        screenWidth: Int,
+        depth: Int,
+        maxDepth: Int
+    ) {
+        if (node == null || depth > maxDepth) return
+        if (isCardSized(node, screenWidth) && hasDollarSign(node)) {
+            cards.add(AccessibilityNodeInfo.obtain(node))
+            return
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            findCardContainers(child, cards, screenWidth, depth + 1, maxDepth)
+            child.recycle()
+        }
+    }
+
+    private fun isCardSized(node: AccessibilityNodeInfo, screenWidth: Int): Boolean {
+        val rect = Rect().also { node.getBoundsInScreen(it) }
+        if (rect.isEmpty) return false
+        val width = rect.width()
+        val height = rect.height()
+        val minWidth = (screenWidth * 0.30).toInt()
+        val maxWidth = (screenWidth * 0.95).toInt()
+        return width in minWidth..maxWidth && height in 80..1200
+    }
+
+    private fun hasDollarSign(node: AccessibilityNodeInfo): Boolean {
+        val text = node.text?.toString() ?: ""
+        val cd = node.contentDescription?.toString() ?: ""
+        if ("$" in text || "$" in cd) return true
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val found = hasDollarSign(child)
+            child.recycle()
+            if (found) return true
+        }
+        return false
+    }
+
+    private fun evaluateCard(card: AccessibilityNodeInfo, windowContextStore: String?): Boolean {
+        val results = mutableListOf<ScanResult>()
+        val allText = StringBuilder()
+        collectNodes(card, 0, 15, results, allText)
+        if (results.isEmpty()) return false
+
+        val hasValidPrice = results.any { it.price >= minPrice && it.price > 0 }
+        if (!hasValidPrice) return false
+        val hasValidDistance = results.any { it.distance <= maxDistance }
+        if (!hasValidDistance) return false
+
+        val store = results.firstOrNull { it.store != null }?.store ?: windowContextStore
+        if (!storeMatches(store)) return false
+        return typeMatches(allText.toString())
+    }
+
+    private fun storeMatches(store: String?): Boolean {
+        if (storeId.isEmpty()) return true
+        val accepted = storeId.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (accepted.isEmpty()) return true
+        return store != null && accepted.contains(store)
+    }
+
+    private fun typeMatches(text: String): Boolean {
+        if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) return true
+        val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        if (kws.isEmpty()) return true
+        return kws.any { text.contains(it, ignoreCase = true) }
     }
 
     private fun findAcceptNodeManually(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
