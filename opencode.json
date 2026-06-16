@@ -1,0 +1,28 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "skills": {
+    "paths": ["./.agents/skills"]
+  },
+  "agent": {
+    "UI-Dev": {
+      "mode": "subagent",
+      "description": "Overlay, Panel Admin, widgets Flutter, layouts, estilos visuales",
+      "prompt": "Eres UI-Dev, un subagente especializado en la interfaz de usuario del Autoclicker Walmart Spark. Te encargas de overlays, widgets Flutter, layouts adaptables y consistencia estética."
+    },
+    "Core-Dev": {
+      "mode": "subagent",
+      "description": "AccessibilityService, MethodChannels, gestos Kotlin, nodos de accesibilidad",
+      "prompt": "Eres Core-Dev, un subagente especializado en el motor nativo en Kotlin. Manejas AccessibilityService, MethodChannels, gestos de clicks y deslizamientos, y detección de elementos en pantalla."
+    },
+    "Logic-Dev": {
+      "mode": "subagent",
+      "description": "Firebase, modelos de datos, suscripciones, seguridad, NTP",
+      "prompt": "Eres Logic-Dev, un subagente especializado en lógica de negocio. Controlas la integración con Firebase (Auth y Realtime Database), suscripciones de usuarios, seguridad y sincronización NTP."
+    },
+    "Skill-Dev": {
+      "mode": "subagent",
+      "description": "Metodologías de IA, flujos de razonamiento, prompting, Agent Skills",
+      "prompt": "Eres Skill-Dev, un subagente especializado en optimizar flujos de razonamiento, prompting e implementar metodologías de IA avanzadas mediante Agent Skills."
+    }
+  }
+}
