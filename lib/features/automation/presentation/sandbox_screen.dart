@@ -37,6 +37,9 @@ class _SandboxScreenState extends State<SandboxScreen> {
     _TestOffer(label: 'Multiviaje', price: '35.00', distance: '4.2', store: '1234', type: 'Multiviajes', color: Colors.cyan),
     _TestOffer(label: 'Barata', price: '12.00', distance: '0.5', store: '5678', type: 'Compras', color: Colors.orange),
     _TestOffer(label: 'Lejana', price: '50.00', distance: '12.5', store: '1234', type: 'Compras', color: Colors.red),
+    _TestOffer(label: 'SoloTi', price: '60.00', distance: '1.0', store: '1234', type: 'Compras', color: Colors.purple, badge: 'SOLO PARA TI'),
+    _TestOffer(label: '8Paradas', price: '40.00', distance: '3.0', store: '1234', type: 'Compras', color: Colors.brown, badge: '8 paradas'),
+    _TestOffer(label: 'Tilde', price: '30.00', distance: '2.0', store: '1234', type: 'Recolección', color: Colors.teal, badge: 'Recolección'),
   ];
 
   @override
@@ -406,6 +409,18 @@ class _SandboxScreenState extends State<SandboxScreen> {
               child: Text(offer.type,
                   style: TextStyle(color: offer.color, fontSize: 11, fontWeight: FontWeight.bold)),
             ),
+            if (offer.badge != null) ...[
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(offer.badge!,
+                    style: const TextStyle(color: Colors.amber, fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+            ],
             const SizedBox(height: 10),
             Semantics(
               label: 'accept_${offer.label}',
@@ -587,6 +602,7 @@ class _TestOffer {
   final String store;
   final String type;
   final MaterialColor color;
+  final String? badge;
 
   const _TestOffer({
     required this.label,
@@ -595,5 +611,6 @@ class _TestOffer {
     required this.store,
     required this.type,
     required this.color,
+    this.badge,
   });
 }

@@ -23,6 +23,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+import java.text.Normalizer
 
 /**
  * Servicio de Accesibilidad para automatizar la captura de ofertas en Spark Driver.
@@ -42,6 +43,10 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         private val DISTANCE_REGEX = Regex("""(\d+[\.,]\d+|\d+)\s*(?:mi|mile|miles|millas|m)\b""", RegexOption.IGNORE_CASE)
         private val STORE_REGEX = Regex("""#\s*(\d+)""")
         private val COUNTDOWN_REGEX = Regex("""disponible\s+en\s+(\d{1,2}):(\d{2})""", RegexOption.IGNORE_CASE)
+        private val SOLO_PARA_TI_REGEX = Regex("""\bsolo\s+para\s+ti\b|\bjust\s+for\s+you\b""", RegexOption.IGNORE_CASE)
+        private val PARADAS_REGEX = Regex("""(\d+)\s*(?:paradas?|stops?)""", RegexOption.IGNORE_CASE)
+        private const val MIN_PARADAS = 1
+        private const val MAX_PARADAS = 5
     }
 
     private data class ScanResult(
@@ -508,6 +513,14 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         collectNodes(card, 0, 15, results, allText)
         if (results.isEmpty()) return false
 
+        val text = allText.toString()
+
+        // Fase 2 — Bloqueo "solo para ti"
+        if (containsBlockedOfferText(text)) return false
+
+        // Fase 2 — Paradas 1-5
+        if (!matchesInternalStops(text)) return false
+
         val hasValidPrice = results.any { it.price >= minPrice && it.price > 0 }
         if (!hasValidPrice) return false
         val hasValidDistance = results.any { it.distance <= maxDistance }
@@ -515,7 +528,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
         val store = results.firstOrNull { it.store != null }?.store ?: windowContextStore
         if (!storeMatches(store)) return false
-        return typeMatches(allText.toString())
+        return typeMatches(text)
     }
 
     private fun storeMatches(store: String?): Boolean {
@@ -529,7 +542,25 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         if (orderType.isBlank() || orderType.equals("Any", ignoreCase = true)) return true
         val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
         if (kws.isEmpty()) return true
-        return kws.any { text.contains(it, ignoreCase = true) }
+        val folded = foldDiacritics(text).lowercase()
+        return kws.any { kw ->
+            foldDiacritics(kw).lowercase().let { folded.contains(it) }
+        }
+    }
+
+    private fun foldDiacritics(s: String): String {
+        val normalized = Normalizer.normalize(s, Normalizer.Form.NFD)
+        return normalized.replace(Regex("""\p{M}+"""), "")
+    }
+
+    private fun containsBlockedOfferText(text: String): Boolean {
+        return SOLO_PARA_TI_REGEX.containsMatchIn(text)
+    }
+
+    private fun matchesInternalStops(text: String): Boolean {
+        val match = PARADAS_REGEX.find(text) ?: return false
+        val stops = match.groupValues[1].toIntOrNull() ?: return false
+        return stops in MIN_PARADAS..MAX_PARADAS
     }
 
     // ── Scroll support ──
