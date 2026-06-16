@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:spark_autoclicker/core/theme/app_theme.dart';
 import 'package:spark_autoclicker/core/utils/accessibility_util.dart';
@@ -11,133 +12,157 @@ class SandboxScreen extends StatefulWidget {
 }
 
 class _SandboxScreenState extends State<SandboxScreen> {
-  bool _isPressed = false;
-  int _heartbeat = 0;
-  Timer? _timer;
+  bool _testMode = false;
+  bool _botActive = false;
+  bool _activating = false;
   final List<String> _logs = [];
-  final ScrollController _scrollController = ScrollController();
+  final ScrollController _logScroll = ScrollController();
+  int _heartbeat = 0;
+  Timer? _heartbeatTimer;
+  Timer? _countdownTimer;
+  int _countdownSeconds = 5;
+  bool _acceptClicked = false;
+  String? _lastChevronTapped;
+
+  // Filter config for the test
+  double _minPrice = 13.0;
+  double _maxDistance = 10.0;
+  String _storeId = "1234";
+  String _orderType = "Compras,Recolección";
+
+  static const _testCards = [
+    _TestOffer(label: 'Buena', price: '45.50', distance: '2.1', store: '1234', type: 'Compras', color: Colors.green),
+    _TestOffer(label: 'Recolección', price: '25.00', distance: '1.5', store: '1234', type: 'Recolección', color: Colors.blue),
+    _TestOffer(label: 'Multiviaje', price: '35.00', distance: '4.2', store: '1234', type: 'Multiviajes', color: Colors.cyan),
+    _TestOffer(label: 'Barata', price: '12.00', distance: '0.5', store: '5678', type: 'Compras', color: Colors.orange),
+    _TestOffer(label: 'Lejana', price: '50.00', distance: '12.5', store: '1234', type: 'Compras', color: Colors.red),
+  ];
 
   @override
   void initState() {
     super.initState();
+    _loadTestLogs();
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _heartbeat++);
+    });
+  }
+
+  @override
+  void dispose() {
+    _heartbeatTimer?.cancel();
+    _countdownTimer?.cancel();
+    _logScroll.dispose();
+    AccessibilityUtil.clearNativeLogger();
+    super.dispose();
+  }
+
+  void _loadTestLogs() {
     AccessibilityUtil.initNativeLogger((log) {
       if (mounted) {
         setState(() {
-          _logs.add(
-              "[${DateTime.now().toString().split(' ')[1].split('.')[0]}] $log");
-          if (_logs.length > 50) _logs.removeAt(0);
+          _logs.add("[${DateTime.now().toString().split(' ')[1].split('.')[0]}] $log");
+          if (_logs.length > 200) _logs.removeRange(0, _logs.length - 200);
         });
-        // Auto-scroll al final
-        Future.delayed(const Duration(milliseconds: 100), () {
-          if (_scrollController.hasClients) {
-            _scrollController.animateTo(
-              _scrollController.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 200),
+        Future.delayed(const Duration(milliseconds: 50), () {
+          if (_logScroll.hasClients) {
+            _logScroll.animateTo(
+              _logScroll.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 150),
               curve: Curves.easeOut,
             );
           }
         });
       }
     });
-    // Forzamos un cambio visual cada segundo para que el AccessibilityService se dispare
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
-        setState(() => _heartbeat++);
+  }
+
+  Future<void> _toggleTestMode() async {
+    if (_testMode) {
+      // Desactivar
+      await AccessibilityUtil.setTestMode(false);
+      if (_botActive) await _toggleBot();
+      setState(() => _testMode = false);
+      _addLog("🧪 Modo prueba DESACTIVADO");
+    } else {
+      // Activar
+      await AccessibilityUtil.setTestMode(true);
+      setState(() => _testMode = true);
+      _addLog("🧪 Modo prueba ACTIVADO — el bot escaneará esta pantalla");
+    }
+  }
+
+  Future<void> _toggleBot() async {
+    if (_activating) return;
+    setState(() => _activating = true);
+    try {
+      if (!_botActive) {
+        _addLog("🔄 Activando bot en modo prueba...");
+        await AccessibilityUtil.updateBotConfiguration(
+          isActive: true,
+          minPrice: _minPrice,
+          maxDistance: _maxDistance,
+          storeId: _storeId,
+          orderType: _orderType,
+          scanSpeed: 300,
+        );
+        setState(() => _botActive = true);
+        _addLog("✅ Bot activado — escaneando ofertas simuladas");
+      } else {
+        await AccessibilityUtil.updateBotConfiguration(
+          isActive: false,
+          minPrice: _minPrice,
+          maxDistance: _maxDistance,
+          storeId: _storeId,
+          orderType: _orderType,
+          scanSpeed: 300,
+        );
+        setState(() => _botActive = false);
+        _addLog("🛑 Bot desactivado");
       }
-    });
+    } catch (e) {
+      _addLog("❌ Error: $e");
+    } finally {
+      setState(() => _activating = false);
+    }
   }
 
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _scrollController.dispose();
-    AccessibilityUtil.clearNativeLogger(); // Limpiar el listener temporal
-    super.dispose();
+  void _addLog(String msg) {
+    if (mounted) {
+      setState(() {
+        _logs.add("[${DateTime.now().toString().split(' ')[1].split('.')[0]}] $msg");
+        if (_logs.length > 200) _logs.removeRange(0, _logs.length - 200);
+      });
+    }
   }
 
-  String _currentOfferText =
-      'Monto: \$20.00\nDistancia: 10 miles\nStore #1234\nCompras';
-
-  void _updateOffer(String price, String distance, String store,
-      {String type = "Compras"}) {
-    setState(() {
-      _currentOfferText =
-          'Monto: \$$price\nDistancia: $distance miles\nStore #$store\n$type';
-      _isPressed = false;
-      _logs.add(">>> OFERTA CAMBIADA: \$$price, $distance mi, #$store, $type");
-    });
-    // Disparar escaneo al cambiar oferta
-    _scanScreen();
-  }
-
-  double _minPrice = 0.0;
-  double _maxDistance = 99.0;
-  String _storeId = "";
-  String _orderType = "";
-
-  void _scanScreen() {
-    // 1. Extraer Monto con soporte decimal
-    final priceRegex = RegExp(r'\$(\d+\.?\d*)');
-    final priceMatch = priceRegex.firstMatch(_currentOfferText);
-    final double currentPrice =
-        double.tryParse(priceMatch?.group(1) ?? '0.0') ?? 0.0;
-
-    // 2. Extraer Distancia
-    final distRegex = RegExp(r'(\d+\.?\d*)\s*miles');
-    final distMatch = distRegex.firstMatch(_currentOfferText);
-    final double currentDistance =
-        double.tryParse(distMatch?.group(1) ?? '99.0') ?? 99.0;
-
-    // 3. Extraer Tienda
-    final storeRegex = RegExp(r'#(\d+)');
-    final storeMatch = storeRegex.firstMatch(_currentOfferText);
-    final String currentStore = storeMatch?.group(1) ?? "";
-
-    setState(() {
-      _logs.add(
-          "LECTURA: \$$currentPrice | $currentDistance mi | Tienda: #$currentStore");
-    });
-
-    // Lógica de decisión simétrica a Kotlin (BÚSQUEDA LITERAL)
-    bool match = true;
-    if (currentPrice < _minPrice) {
-      match = false;
-      _logs.add("RECHAZADO: Precio \$$currentPrice < \$$_minPrice");
-    }
-    if (currentDistance > _maxDistance) {
-      match = false;
-      _logs.add("RECHAZADO: Distancia $currentDistance > $_maxDistance");
-    }
-    if (_storeId.isNotEmpty && _storeId != currentStore) {
-      match = false;
-      _logs.add("RECHAZADO: Tienda #$currentStore != #$_storeId");
-    }
-
-    // BÚSQUEDA LITERAL DE KEYWORDS (Sin suposiciones)
-    if (_orderType != "Any" && _orderType.isNotEmpty) {
-      final filterKeywords = _orderType.split(',');
-      final hasMatch =
-          filterKeywords.any((keyword) => _currentOfferText.contains(keyword));
-
-      if (!hasMatch) {
-        match = false;
-        _logs.add(
-            "RECHAZADO: Ninguna palabra clave [$filterKeywords] encontrada en el texto.");
+  void _simularCountdown() {
+    if (_countdownTimer != null) return;
+    setState(() => _countdownSeconds = 5);
+    _addLog("⏳ Countdown iniciado: disponible en 0:05");
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _countdownSeconds <= 1) {
+        timer.cancel();
+        _countdownTimer = null;
+        if (mounted) {
+          setState(() => _countdownSeconds = 0);
+          _addLog("✅ Countdown expirado — ACEPTAR debería estar visible ahora");
+        }
+        return;
       }
-    }
-
-    if (match && currentPrice > 0) {
-      _logs.add("✅ ¡CRITERIOS CUMPLIDOS! Evaluando clic...");
-    }
+      setState(() => _countdownSeconds--);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final cardWidth = screenWidth * 0.85;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Motor Sandbox (Pruebas)',
-            style: TextStyle(color: Colors.white)),
+        title: const Text('Sandbox de Pruebas',
+            style: TextStyle(color: Colors.white, fontSize: 16)),
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
@@ -145,207 +170,392 @@ class _SandboxScreenState extends State<SandboxScreen> {
           IconButton(
             icon: const Icon(Icons.delete_sweep, color: Colors.white54),
             onPressed: () => setState(() => _logs.clear()),
-          )
+            tooltip: 'Limpiar logs',
+          ),
         ],
       ),
       body: Column(
         children: [
+          // === Control panel ===
+          _buildControlPanel(),
+          const Divider(height: 1, color: Colors.white10),
+
+          // === Fake offer cards ===
           Expanded(
-            flex: 2,
+            flex: 3,
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0A1629),
-                    borderRadius: BorderRadius.circular(28),
-                    border: Border.all(color: AppColors.borderBlue, width: 2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 20,
-                        offset: const Offset(0, 10),
-                      )
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'SIMULACIÓN DE OFERTA SPARK',
-                        style: TextStyle(
-                          color: AppColors.primarySpark,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        _currentOfferText,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 20, height: 1.5),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Heartbeat (Actividad): $_heartbeat',
-                        style: const TextStyle(
-                            color: Colors.white24, fontSize: 10),
-                      ),
-                      const SizedBox(height: 24),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        alignment: WrapAlignment.center,
-                        children: [
-                          _offerButton(
-                              'Buena', '45.50', '2.1', '1234', Colors.green,
-                              type: "Compras"),
-                          _offerButton('Recolección', '25.00', '1.5', '1234',
-                              Colors.blue,
-                              type: "Recolección"),
-                          _offerButton(
-                              'Multiviaje', '35.00', '4.2', '1234', Colors.cyan,
-                              type: "Multiviajes"),
-                          _offerButton(
-                              'Barata', '12.00', '1.5', '1234', Colors.orange,
-                              type: "Compras"),
-                          _offerButton(
-                              'Lejos', '50.00', '12.5', '1234', Colors.red,
-                              type: "Compras"),
-                        ],
-                      ),
-                      const SizedBox(height: 32),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: () async {
-                            bool isEnabled =
-                                await AccessibilityUtil.isServiceEnabled();
-                            if (!isEnabled) {
-                              if (!context.mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content:
-                                        Text('Activa el servicio en Ajustes')),
-                              );
-                              await AccessibilityUtil.openSettings();
-                              return;
-                            }
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  ..._testCards.map((offer) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _buildOfferCard(offer, cardWidth),
+                  )),
 
-                            await AccessibilityUtil.updateBotConfiguration(
-                              isActive: true,
-                              minPrice: 13.50,
-                              maxDistance: 5.5,
-                              storeId: "1234",
-                              orderType: "Compras,Recolección",
-                              scanSpeed: 500,
-                            );
+                  // Countdown section
+                  _buildCountdownSection(cardWidth),
+                  const SizedBox(height: 12),
 
-                            setState(() {
-                              _minPrice = 13.50;
-                              _maxDistance = 5.5;
-                              _storeId = "1234";
-                              _orderType = "Compras,Recolección";
-                              _logs.add(
-                                  ">>> CONFIGURACIÓN APLICADA: >\$13.50, <5.5mi, Tienda #1234, [Compras,Recolección]");
-                            });
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.borderBlue,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                          ),
-                          child: const Text(
-                              '1. APLICAR FILTROS (Muestra Decimal)',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: Semantics(
-                          label: 'Accept',
-                          button: true,
-                          child: ElevatedButton(
-                            onPressed: () {
-                              setState(() => _isPressed = true);
-                              _logs.add(
-                                  ">>> EVENTO: Botón presionado físicamente");
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _isPressed
-                                  ? Colors.green
-                                  : AppColors.primarySpark,
-                              foregroundColor: Colors.black,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12)),
-                            ),
-                            child: const Text('Accept',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 18)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'El bot busca la palabra "Accept"',
-                        style: TextStyle(color: Colors.white24, fontSize: 11),
-                      ),
-                    ],
-                  ),
-                ),
+                  // ACEPTAR button
+                  _buildAcceptButton(cardWidth),
+                  const SizedBox(height: 40),
+                ],
               ),
             ),
           ),
-          // Consola de Logs
+
+          const Divider(height: 1, color: Colors.white10),
+
+          // === Log console ===
           Expanded(
-            flex: 1,
-            child: Container(
-              width: double.infinity,
-              margin: const EdgeInsets.all(16),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white10),
-              ),
-              child: ListView.builder(
-                controller: _scrollController,
-                itemCount: _logs.length,
-                itemBuilder: (context, index) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 2),
-                    child: Text(
-                      _logs[index],
-                      style: const TextStyle(
-                        color: Colors.greenAccent,
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
+            flex: 2,
+            child: _buildLogConsole(),
           ),
         ],
       ),
     );
   }
 
-  Widget _offerButton(String label, String p, String d, String s, Color color,
-      {String type = "Compras"}) {
-    return ActionChip(
-      label: Text(label,
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-      backgroundColor: color.withValues(alpha: 0.15),
-      side: BorderSide(color: color.withValues(alpha: 0.5)),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      onPressed: () => _updateOffer(p, d, s, type: type),
+  Widget _buildControlPanel() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: const Color(0xFF0A1629),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.science_outlined,
+                  color: _testMode ? Colors.orangeAccent : Colors.white38, size: 20),
+              const SizedBox(width: 8),
+              Text('MODO PRUEBA',
+                  style: TextStyle(
+                    color: _testMode ? Colors.orangeAccent : Colors.white38,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  )),
+              const Spacer(),
+              SizedBox(
+                height: 32,
+                child: ElevatedButton.icon(
+                  onPressed: _toggleTestMode,
+                  icon: Icon(
+                    _testMode ? Icons.power_settings_new : Icons.play_arrow,
+                    size: 14,
+                  ),
+                  label: Text(_testMode ? 'DESACTIVAR' : 'ACTIVAR',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _testMode ? Colors.orangeAccent : AppColors.borderBlue,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildFilterChip('\$${_minPrice.toStringAsFixed(0)} min'),
+              const SizedBox(width: 6),
+              _buildFilterChip('${_maxDistance.toStringAsFixed(0)}mi max'),
+              const SizedBox(width: 6),
+              _buildFilterChip('#$_storeId'),
+              const SizedBox(width: 6),
+              _buildFilterChip(_orderType.replaceAll(',', ' | ')),
+              const Spacer(),
+              Container(
+                width: 10, height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _botActive ? Colors.greenAccent : Colors.redAccent,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                _botActive ? 'BOT ON' : 'BOT OFF',
+                style: TextStyle(
+                  color: _botActive ? Colors.greenAccent : Colors.redAccent,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          if (_testMode)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: SizedBox(
+                width: double.infinity,
+                height: 36,
+                child: ElevatedButton.icon(
+                  onPressed: _activating ? null : _toggleBot,
+                  icon: _activating
+                      ? const SizedBox(
+                          width: 14, height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                      : Icon(
+                          _botActive ? Icons.pause : Icons.play_arrow,
+                          size: 16,
+                        ),
+                  label: Text(
+                    _activating
+                        ? 'ACTIVANDO...'
+                        : (_botActive ? 'DETENER BOT' : 'ACTIVAR BOT'),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _botActive ? Colors.redAccent : Colors.greenAccent,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
+
+  Widget _buildFilterChip(String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.primarySpark.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(text,
+          style: const TextStyle(color: AppColors.primarySpark, fontSize: 9, fontWeight: FontWeight.bold)),
+    );
+  }
+
+  Widget _buildOfferCard(_TestOffer offer, double cardWidth) {
+    return Semantics(
+      container: true,
+      child: Container(
+        width: cardWidth,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0D1B3E),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: offer.color.withValues(alpha: 0.3), width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('\$${offer.price}',
+                    style: TextStyle(
+                      color: offer.color,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    )),
+                Semantics(
+                  label: 'chevron_${offer.label}',
+                  child: IconButton(
+                    icon: Icon(Icons.chevron_right, color: offer.color, size: 28),
+                    onPressed: () {
+                      _addLog("▶️ Chevron '${offer.label}' presionado manualmente");
+                      setState(() => _lastChevronTapped = offer.label);
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(Icons.location_on, size: 14, color: Colors.white54),
+                const SizedBox(width: 4),
+                Text('${offer.distance} mi',
+                    style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                const Spacer(),
+                Icon(Icons.store, size: 14, color: Colors.white54),
+                const SizedBox(width: 4),
+                Text('#${offer.store}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 14)),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: offer.color.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(offer.type,
+                  style: TextStyle(color: offer.color, fontSize: 11, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCountdownSection(double cardWidth) {
+    return Semantics(
+      container: true,
+      child: Container(
+        width: cardWidth,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0D1B3E),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.amber.withValues(alpha: 0.3), width: 1.5),
+        ),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.timer_outlined, color: Colors.amber, size: 20),
+                    const SizedBox(width: 8),
+                    const Text('OFERTA CON TEMPORIZADOR',
+                        style: TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                if (_countdownSeconds > 0)
+                  Text('0:${_countdownSeconds.toString().padLeft(2, '0')}',
+                      style: const TextStyle(color: Colors.amber, fontSize: 24, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'disponible en 0:05',
+              style: TextStyle(color: Colors.amber, fontSize: 13),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _countdownTimer != null ? null : _simularCountdown,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber.withValues(alpha: 0.2),
+                  foregroundColor: Colors.amber,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                ),
+                child: Text(
+                  _countdownTimer != null ? 'CONTANDO...' : 'INICIAR COUNTDOWN',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAcceptButton(double cardWidth) {
+    return Semantics(
+      container: true,
+      button: true,
+      child: SizedBox(
+        width: cardWidth,
+        child: ElevatedButton(
+          onPressed: () {
+            setState(() => _acceptClicked = true);
+            _addLog("✅ ACEPTAR presionado manualmente — el bot debería detectarlo");
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _acceptClicked ? Colors.green : AppColors.primarySpark,
+            foregroundColor: Colors.black,
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+          child: Text(
+            _acceptClicked ? '✅ ¡ACEPTADO!' : 'ACEPTAR',
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLogConsole() {
+    return Container(
+      width: double.infinity,
+      color: Colors.black87,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            color: Colors.white.withValues(alpha: 0.03),
+            child: Row(
+              children: [
+                const Icon(Icons.terminal, color: Colors.greenAccent, size: 14),
+                const SizedBox(width: 6),
+                const Text('LOGS DEL BOT',
+                    style: TextStyle(color: Colors.greenAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                Text('${_logs.length} líneas',
+                    style: const TextStyle(color: Colors.white24, fontSize: 10)),
+              ],
+            ),
+          ),
+          Expanded(
+            child: _logs.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Activa el modo prueba y el bot para ver logs',
+                      style: TextStyle(color: Colors.white24, fontSize: 12),
+                    ),
+                  )
+                : ListView.builder(
+                    controller: _logScroll,
+                    padding: const EdgeInsets.all(8),
+                    itemCount: _logs.length,
+                    itemBuilder: (context, i) {
+                      final log = _logs[i];
+                      Color textColor = Colors.greenAccent;
+                      if (log.contains('❌')) textColor = Colors.redAccent;
+                      else if (log.contains('✅') || log.contains('🎯') || log.contains('⚡')) textColor = Colors.greenAccent;
+                      else if (log.contains('⚠️') || log.contains('⏳')) textColor = Colors.orangeAccent;
+                      else if (log.contains('🛑') || log.contains('💀')) textColor = Colors.redAccent;
+                      else if (log.contains('🧪')) textColor = Colors.orangeAccent;
+                      else if (log.contains('📜')) textColor = Colors.cyanAccent;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 1),
+                        child: Text(
+                          log,
+                          style: TextStyle(
+                            color: textColor,
+                            fontFamily: 'monospace',
+                            fontSize: 10,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TestOffer {
+  final String label;
+  final String price;
+  final String distance;
+  final String store;
+  final String type;
+  final MaterialColor color;
+
+  const _TestOffer({
+    required this.label,
+    required this.price,
+    required this.distance,
+    required this.store,
+    required this.type,
+    required this.color,
+  });
 }

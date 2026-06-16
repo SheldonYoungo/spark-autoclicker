@@ -188,6 +188,14 @@ class SparkNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     result.error("SERVICE_NOT_RUNNING", "Service not running", null)
                 }
             }
+            "setTestMode" -> {
+                val mode = call.argument<Boolean>("testMode") ?: false
+                SparkAccessibilityService.instance?.let {
+                    it.testMode = mode
+                    Log.d(TAG, "🧪 Modo prueba: ${if (mode) "ON" else "OFF"}")
+                }
+                result.success(true)
+            }
             else -> {
                 result.notImplemented()
             }

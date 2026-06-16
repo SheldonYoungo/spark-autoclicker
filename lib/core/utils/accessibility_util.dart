@@ -94,6 +94,16 @@ class AccessibilityUtil {
     }
   }
 
+  /// Activa/desactiva el modo de prueba (escanea nuestra propia app)
+  static Future<void> setTestMode(bool enabled) async {
+    try {
+      await _channel.invokeMethod('setTestMode', {'testMode': enabled});
+      debugPrint("🧪 Modo prueba: ${enabled ? "ON" : "OFF"}");
+    } catch (e) {
+      debugPrint("Error cambiando modo prueba: $e");
+    }
+  }
+
   /// Verifica si la app está exenta de la optimización de batería
   static Future<bool> isIgnoringBatteryOptimizations() async {
     try {
