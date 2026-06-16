@@ -23,6 +23,7 @@ class _SandboxScreenState extends State<SandboxScreen> {
   int _countdownSeconds = 5;
   bool _acceptClicked = false;
   String? _lastChevronTapped;
+  final Set<String> _acceptedLabels = {};
 
   // Filter config for the test
   double _minPrice = 13.0;
@@ -30,7 +31,7 @@ class _SandboxScreenState extends State<SandboxScreen> {
   String _storeId = "1234";
   String _orderType = "Compras,Recolección";
 
-  static const _testCards = [
+  final List<_TestOffer> _testCards = [
     _TestOffer(label: 'Buena', price: '45.50', distance: '2.1', store: '1234', type: 'Compras', color: Colors.green),
     _TestOffer(label: 'Recolección', price: '25.00', distance: '1.5', store: '1234', type: 'Recolección', color: Colors.blue),
     _TestOffer(label: 'Multiviaje', price: '35.00', distance: '4.2', store: '1234', type: 'Multiviajes', color: Colors.cyan),
@@ -53,7 +54,16 @@ class _SandboxScreenState extends State<SandboxScreen> {
     _countdownTimer?.cancel();
     _logScroll.dispose();
     AccessibilityUtil.clearNativeLogger();
+    _cleanupTestMode();
     super.dispose();
+  }
+
+  void _cleanupTestMode() {
+    if (_testMode || _botActive) {
+      AccessibilityUtil.setTestMode(false);
+      _testMode = false;
+      _botActive = false;
+    }
   }
 
   void _loadTestLogs() {
@@ -135,6 +145,11 @@ class _SandboxScreenState extends State<SandboxScreen> {
     }
   }
 
+  void _acceptOffer(String label) {
+    setState(() => _acceptedLabels.add(label));
+    _addLog("✅ Oferta '$label' aceptada — tarjeta eliminada");
+  }
+
   void _simularCountdown() {
     if (_countdownTimer != null) return;
     setState(() => _countdownSeconds = 5);
@@ -187,10 +202,12 @@ class _SandboxScreenState extends State<SandboxScreen> {
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
-                  ..._testCards.map((offer) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _buildOfferCard(offer, cardWidth),
-                  )),
+                  ..._testCards
+                      .where((o) => !_acceptedLabels.contains(o.label))
+                      .map((offer) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _buildOfferCard(offer, cardWidth),
+                      )),
 
                   // Countdown section
                   _buildCountdownSection(cardWidth),
@@ -388,6 +405,27 @@ class _SandboxScreenState extends State<SandboxScreen> {
               ),
               child: Text(offer.type,
                   style: TextStyle(color: offer.color, fontSize: 11, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(height: 10),
+            Semantics(
+              label: 'accept_${offer.label}',
+              button: true,
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => _acceptOffer(offer.label),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.greenAccent.withValues(alpha: 0.25),
+                    foregroundColor: Colors.greenAccent,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text('ACEPTAR',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                ),
+              ),
             ),
           ],
         ),

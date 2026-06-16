@@ -567,7 +567,30 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     private fun scrollDown(root: AccessibilityNodeInfo): Boolean {
         val scrollable = findBestScrollable(root) ?: return false
         try {
-            return scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            val bounds = Rect()
+            scrollable.getBoundsInScreen(bounds)
+            if (bounds.isEmpty) return false
+
+            // Gentle swipe: 150px or 25% of viewport, whichever is smaller
+            val swipeDistance = minOf(150f, bounds.height() * 0.25f).coerceAtLeast(40f)
+            val startX = bounds.centerX().toFloat()
+            val startY = (bounds.top + bounds.height() * 0.70f)
+                .coerceAtMost((bounds.bottom - 10).toFloat())
+            val endY = (startY - swipeDistance)
+                .coerceAtLeast((bounds.top + 10).toFloat())
+
+            if (startY <= endY) return false
+
+            val path = Path().apply {
+                moveTo(startX, startY)
+                lineTo(startX, endY)
+            }
+            val stroke = GestureDescription.StrokeDescription(path, 0, 120L)
+            val gesture = GestureDescription.Builder()
+                .addStroke(stroke)
+                .build()
+
+            return dispatchGesture(gesture, null, null)
         } catch (_: Exception) {
             return false
         } finally {
