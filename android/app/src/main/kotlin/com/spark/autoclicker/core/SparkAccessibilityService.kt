@@ -116,6 +116,25 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         }
     }
 
+    // ── Safe node recycling helpers ──
+
+    private fun safeRecycle(node: AccessibilityNodeInfo?) {
+        try { node?.recycle() } catch (_: Exception) {}
+    }
+
+    private fun safeRecycleAll(nodes: List<AccessibilityNodeInfo?>) {
+        for (n in nodes) safeRecycle(n)
+    }
+
+    private fun <T> withNode(node: AccessibilityNodeInfo?, block: (AccessibilityNodeInfo) -> T): T? {
+        if (node == null) return null
+        try {
+            return block(node)
+        } finally {
+            safeRecycle(node)
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
 
@@ -232,7 +251,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         var countdownAction = false
         var scrolledForAccept = false
 
-        for (root in roots) {
+        try {
+            for (root in roots) {
             val pkg = root.packageName?.toString() ?: ""
             val isOurPkg = pkg == "com.spark.autoclicker"
             if (!(pkg.contains("walmart", ignoreCase = true) || (testMode && isOurPkg))) continue
@@ -307,68 +327,80 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             // Step 1: Search within matchedRoot (fast path — ACEPTAR inside the card)
             for (kw in acceptKeywords) {
                 val nodes = matchedRoot.findAccessibilityNodeInfosByText(kw)
-                if (nodes.isNotEmpty()) {
-                    val validNode = nodes.firstOrNull { node ->
-                        val rect = Rect().also { node.getBoundsInScreen(it) }
-                        val isNotTooGiant = rect.width() < 2000 && rect.height() < 500
-                        !rect.isEmpty && isNotTooGiant
-                    }
-                    if (validNode != null) {
-                        val finalRect = Rect().also { validNode.getBoundsInScreen(it) }
-                        logToFlutter("🔍 Accept ('$kw') en: $finalRect")
-                        if (isOffScreenBelow(finalRect)) {
-                            logToFlutter("📜 Accept fuera de pantalla (y=${finalRect.bottom} > $screenHeightPx). Scrolleando...")
-                            scrolledForAccept = true
-                        } else {
-                            val nodeToClick = AccessibilityNodeInfo.obtain(validNode)
-                            val result = clickNode(nodeToClick, finalRect)
-                            nodeToClick.recycle()
-                            if (result) {
-                                logToFlutter("✅ ¡Accept completado!")
-                                clicked = true
+                try {
+                    if (nodes.isNotEmpty()) {
+                        val validNode = nodes.firstOrNull { node ->
+                            val rect = Rect().also { node.getBoundsInScreen(it) }
+                            val isNotTooGiant = rect.width() < 2000 && rect.height() < 500
+                            !rect.isEmpty && isNotTooGiant
+                        }
+                        if (validNode != null) {
+                            val finalRect = Rect().also { validNode.getBoundsInScreen(it) }
+                            logToFlutter("🔍 Accept ('$kw') en: $finalRect")
+                            if (isOffScreenBelow(finalRect)) {
+                                logToFlutter("📜 Accept fuera de pantalla (y=${finalRect.bottom} > $screenHeightPx). Scrolleando...")
+                                scrolledForAccept = true
+                            } else {
+                                val nodeToClick = AccessibilityNodeInfo.obtain(validNode)
+                                try {
+                                    val result = clickNode(nodeToClick, finalRect)
+                                    if (result) {
+                                        logToFlutter("✅ ¡Accept completado!")
+                                        clicked = true
+                                    }
+                                } finally {
+                                    nodeToClick.recycle()
+                                }
                             }
                         }
                     }
-                    nodes.forEach { it.recycle() }
-                    if (clicked) break
+                } finally {
+                    safeRecycleAll(nodes as List<AccessibilityNodeInfo?>)
                 }
+                if (clicked) break
             }
 
             // Step 2: Fallback — search ALL walmart windows (ACEPTAR may be outside the card)
             if (!clicked) {
                 for (kw in acceptKeywords) {
+                    if (clicked) break
                     for (root in roots) {
                         val pkg = root.packageName?.toString() ?: ""
                         if (!(pkg.contains("walmart", ignoreCase = true) || (testMode && pkg == "com.spark.autoclicker"))) continue
 
                         val nodes = root.findAccessibilityNodeInfosByText(kw)
-                        if (nodes.isNotEmpty()) {
-                            val validNode = nodes.firstOrNull { node ->
-                                val rect = Rect().also { node.getBoundsInScreen(it) }
-                                val isNotTooGiant = rect.width() < 2000 && rect.height() < 500
-                                !rect.isEmpty && isNotTooGiant
-                            }
-                            if (validNode != null) {
-                                val finalRect = Rect().also { validNode.getBoundsInScreen(it) }
-                                logToFlutter("🔍 Accept ('$kw' — full window) en: $finalRect")
-                                if (isOffScreenBelow(finalRect)) {
-                                    logToFlutter("📜 Accept fuera de pantalla (y=${finalRect.bottom} > $screenHeightPx). Scrolleando...")
-                                    scrolledForAccept = true
-                                } else {
-                                    val nodeToClick = AccessibilityNodeInfo.obtain(validNode)
-                                    val result = clickNode(nodeToClick, finalRect)
-                                    nodeToClick.recycle()
-                                    if (result) {
-                                        logToFlutter("✅ ¡Accept completado!")
-                                        clicked = true
+                        try {
+                            if (nodes.isNotEmpty()) {
+                                val validNode = nodes.firstOrNull { node ->
+                                    val rect = Rect().also { node.getBoundsInScreen(it) }
+                                    val isNotTooGiant = rect.width() < 2000 && rect.height() < 500
+                                    !rect.isEmpty && isNotTooGiant
+                                }
+                                if (validNode != null) {
+                                    val finalRect = Rect().also { validNode.getBoundsInScreen(it) }
+                                    logToFlutter("🔍 Accept ('$kw' — full window) en: $finalRect")
+                                    if (isOffScreenBelow(finalRect)) {
+                                        logToFlutter("📜 Accept fuera de pantalla (y=${finalRect.bottom} > $screenHeightPx). Scrolleando...")
+                                        scrolledForAccept = true
+                                    } else {
+                                        val nodeToClick = AccessibilityNodeInfo.obtain(validNode)
+                                        try {
+                                            val result = clickNode(nodeToClick, finalRect)
+                                            if (result) {
+                                                logToFlutter("✅ ¡Accept completado!")
+                                                clicked = true
+                                            }
+                                        } finally {
+                                            nodeToClick.recycle()
+                                        }
                                     }
                                 }
                             }
-                            nodes.forEach { it.recycle() }
-                            if (clicked) break
+                        } finally {
+                            safeRecycleAll(nodes as List<AccessibilityNodeInfo?>)
                         }
+                        if (clicked) break
                     }
-                    if (clicked) break
                 }
             }
 
@@ -416,8 +448,10 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             }
         }
 
-        for (root in roots) root.recycle()
-        if (matchedRootIsCard) matchedRoot?.recycle()
+        } finally {
+            safeRecycleAll(roots)
+            if (matchedRootIsCard) safeRecycle(matchedRoot)
+        }
     }
 
     /**
