@@ -222,7 +222,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   verificationId: verId,
                   smsCode: code,
                   isAdminRequest: true,
-                );
+                ).timeout(const Duration(seconds: 60));
                 _popSafe(); // Quitar loading
               } catch (e) {
                 _popSafe(); // Quitar loading
@@ -239,7 +239,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void _showLoadingDialog(String message) {
     showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.background,
         content: Column(

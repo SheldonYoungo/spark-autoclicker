@@ -76,7 +76,7 @@ class FilterService {
 
   Future<void> _sendToOtherIsolate(dynamic message) async {
     if (message is String) {
-      await FlutterOverlayWindow.shareData(message);
+      FlutterOverlayWindow.shareData(message);
     }
 
     final targetPortName = _portName + (isMainIsolate ? '_overlay' : '_main');
@@ -203,12 +203,11 @@ class FilterService {
           await AccessibilityUtil.openSettings();
           return;
         }
-      }
-      
-      bool isValid = await isSessionValid();
-      if (!isValid) {
-        debugPrint("FilterService: Sesión inválida, abortando toggle.");
-        return;
+        bool isValid = await isSessionValid();
+        if (!isValid) {
+          debugPrint("FilterService: Sesión inválida, abortando toggle.");
+          return;
+        }
       }
     }
 

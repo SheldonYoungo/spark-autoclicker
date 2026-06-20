@@ -110,11 +110,12 @@ class _OverlayScreenState extends State<OverlayScreen> {
 
           try {
             final screenW = s.screenWidth;
+            final screenH = s.screenHeight;
             final centerX = ((screenW - s.panelWidth) / 2).round().clamp(0, 999);
-            final destY = _originalPosition?.y ?? 0.0;
+            final centerY = ((screenH - s.panelHeight) / 2).round().clamp(0, 999);
 
             await FlutterOverlayWindow.moveOverlay(
-              OverlayPosition(centerX.toDouble(), destY),
+              OverlayPosition(centerX.toDouble(), centerY.toDouble()),
             );
           } catch (e) {
             debugPrint("moveOverlay centrar panel falló: $e");
@@ -172,11 +173,9 @@ class _OverlayScreenState extends State<OverlayScreen> {
     return RepaintBoundary(
       key: const ValueKey('panel'),
       child: Center(
-        child: OverflowBox(
-          maxWidth: s.panelWidth.toDouble(),
-          maxHeight: s.panelHeight + 40.0,
-          child: Container(
-            width: s.containerWidth,
+        child: Container(
+          width: s.panelWidth.toDouble(),
+          constraints: BoxConstraints(maxHeight: s.panelHeight.toDouble()),
         padding: EdgeInsets.symmetric(horizontal: 16 * ss, vertical: 20 * ss),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
@@ -279,7 +278,6 @@ class _OverlayScreenState extends State<OverlayScreen> {
         ),
       ),
       ),
-      ),
     );
   }
 
@@ -358,7 +356,7 @@ class _OverlayScreenState extends State<OverlayScreen> {
     final bool newState = !currentState;
     if (mounted) setState(() => _isValidating = true);
     try {
-      await _filterService.toggleBot(newState);
+      await _filterService.toggleBot(newState).timeout(const Duration(seconds: 8));
     } catch (e) {
       debugPrint("Overlay: Error al solicitar toggle del bot: $e");
     } finally {

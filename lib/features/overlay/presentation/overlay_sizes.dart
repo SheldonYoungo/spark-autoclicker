@@ -20,11 +20,9 @@ class OverlaySizes {
   }
 
   int get panelHeight {
-    final ratio = isShortScreen ? 0.75 : 0.80;
-    return (screenHeight * ratio).clamp(420.0, 600.0).toInt();
+    final ratio = isShortScreen ? 0.85 : 0.80;
+    return (screenHeight * ratio).clamp(320.0, 600.0).toInt();
   }
-
-  double get containerWidth => panelWidth - 24.0;
 
   double get fontScale => isSmallScreen ? 0.85 : 1.0;
 
