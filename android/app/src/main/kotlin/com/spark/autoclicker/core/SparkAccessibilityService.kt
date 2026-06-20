@@ -109,6 +109,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         Log.d(TAG, message)
 
         val isCritical = message.startsWith("STATUS:") ||
+                         message.startsWith("DIAG:") ||
                          message.startsWith("✅") ||
                          message.startsWith("🤖") ||
                          message.startsWith("🛑") ||
@@ -336,12 +337,12 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                     val text = allText.toString()
                     val textPreview = text.take(500).replace('\n', ' ')
                     Log.d(TAG, "📋 Flat scan text: \"$textPreview\"...")
+                    sendDiagnosticData("flat_scan_text", textPreview)
                     val storeCodes = STORE_REGEX.findAll(text)
                         .map { it.groupValues[1] }.distinct().toList()
                     if (storeCodes.size > 1) {
                         Log.d(TAG, "📋 Flat scan: múltiples tiendas ($storeCodes), textos mezclados. Rechazando.")
                     } else {
-                        sendDiagnosticData("flat_scan_text", textPreview)
                         val blocked = containsBlockedOfferText(text)
                         val stopsOk = matchesInternalStops(text)
                         Log.d(TAG, "📋 Flat scan checks: blocked=$blocked stopsOk=$stopsOk storeCodes=$storeCodes")
@@ -368,9 +369,9 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                                 Log.d(TAG, "📋 Flat scan: oferta rechazada por filtros")
                                 sendDiagnosticData("scan_result", "filtered_out_blocked_or_stops")
                             }
+                        } else {
+                            sendDiagnosticData("scan_result", "no_filter_match")
                         }
-                    } else {
-                        sendDiagnosticData("scan_result", "no_filter_match")
                     }
                 } else {
                     sendDiagnosticData("flat_scan_text", "(empty)")
@@ -395,15 +396,12 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             }
 
             // Phase 4: Chevron tap — tap top-right corner of matching cards
-            if (!matchedRootIsCard) {
-                val canChevron = System.currentTimeMillis() - lastChevronTapMs >= chevronCooldownMs
-                if (canChevron && findAndTapOfferChevron(root)) {
-                    lastChevronTapMs = System.currentTimeMillis()
-                    actionTaken = true
-                    chevronOpenedDetail = true
-                    break
-                }
-            }
+            val canChevron = System.currentTimeMillis() - lastChevronTapMs >= chevronCooldownMs
+            if (canChevron && findAndTapOfferChevron(root)) {
+                lastChevronTapMs = System.currentTimeMillis()
+                actionTaken = true
+                chevronOpenedDetail = true
+                break
             }
         }
 
@@ -741,6 +739,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             .map { it.groupValues[1] }.distinct().toList()
         if (storeCodes.size > 1) {
             Log.d(TAG, "📦 Card rechazada: múltiples tiendas ($storeCodes), posible contenedor")
+            sendDiagnosticData("card_rejection", "multi_tienda_$storeCodes")
             return false
         }
 
@@ -797,7 +796,6 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
         if (kws.isEmpty()) return true
         val folded = foldDiacritics(text).lowercase()
-
         return kws.any { kw ->
             val nkw = foldDiacritics(kw).lowercase()
             if (folded.contains(nkw)) return true
