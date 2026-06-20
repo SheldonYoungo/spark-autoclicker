@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
+import '../../features/automation/data/diagnostics_service.dart';
 
 class AccessibilityUtil {
   static const MethodChannel _channel = MethodChannel('com.spark.autoclicker/core');
@@ -25,10 +26,15 @@ class AccessibilityUtil {
       if (call.method == 'nativeLog') {
         final message = call.arguments.toString();
         
-        // 1. Ejecutar el handler global (si existe)
+        // 1. Enrutar mensajes DIAG al DiagnosticsService
+        if (message.startsWith('DIAG:')) {
+          DiagnosticsService().onNativeLog(message);
+        }
+        
+        // 2. Ejecutar el handler global (si existe)
         _globalLogHandler?.call(message);
         
-        // 2. Ejecutar el handler temporal (si existe)
+        // 3. Ejecutar el handler temporal (si existe)
         _onNativeLog?.call(message);
       }
     });

@@ -86,7 +86,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     }
 
     private fun isOffScreenBelow(rect: Rect): Boolean {
-        return rect.bottom > screenHeightPx - 80
+        return rect.bottom > screenHeightPx - 200
     }
 
     private enum class TimedOfferState { NONE, PRESENT, PRECLICKED }
@@ -96,7 +96,13 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private val acceptKeywords = listOf(
-        "accept", "aceptar", "confirm", "confirmar", "tomar", "take it"
+        "accept", "aceptar", "confirm", "confirmar", "tomar", "take it", "take order"
+    )
+
+    private val TYPE_SYNONYMS = mapOf(
+        "compra" to listOf("compra", "shopping", "groceries", "express", "envio", "entrega", "grocery"),
+        "recolección" to listOf("recolección", "pickup", "curbside", "delivery", "retiro", "recogida"),
+        "multiviaje" to listOf("multiviaje", "batch", "multiple", "stops", "viaje", "multi"),
     )
 
     private fun logToFlutter(message: String) {
@@ -122,6 +128,21 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 }
             }
         }
+    }
+
+    private fun sendDiagnosticData(key: String, value: String) {
+        val clean = value.replace('\n', ' ').replace('\r', ' ')
+        val escaped = clean.replace("\\", "\\\\").replace("\"", "\\\"")
+        logToFlutter("DIAG:{\"$key\":\"$escaped\"}")
+    }
+
+    private fun sendDiagnosticDataMap(data: Map<String, String>) {
+        val json = data.entries.joinToString(",") { (k, v) ->
+            val clean = v.replace('\n', ' ').replace('\r', ' ')
+            val ev = clean.replace("\\", "\\\\").replace("\"", "\\\"")
+            "\"$k\":\"$ev\""
+        }
+        logToFlutter("DIAG:{$json}")
     }
 
     // ── Safe node recycling helpers ──
@@ -218,6 +239,13 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         val statusText = if (active) "ON" else "OFF"
         logToFlutter("🤖 Motor Nativo: Sincronización Automática -> $statusText | Speed=${speed}ms")
         Log.d(TAG, "⚙️ Config: MinPrice=$price, Distance=$distance, Store=$store, Type=$type, Speed=${speed}ms")
+        sendDiagnosticDataMap(mapOf(
+            "native_bot_active" to active.toString(),
+            "native_min_price" to price.toString(),
+            "native_max_distance" to distance.toString(),
+            "native_store_id" to store.ifEmpty { "(empty)" },
+            "native_order_type" to type.ifEmpty { "(empty)" },
+        ))
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -261,11 +289,14 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         var scrolledForAccept = false
         var chevronOpenedDetail = false
 
+        sendDiagnosticData("windows_count", roots.size.toString())
+
         try {
             for (root in roots) {
             val pkg = root.packageName?.toString() ?: ""
             val isOurPkg = pkg == "com.spark.autoclicker"
             if (!(pkg.contains("walmart", ignoreCase = true) || (testMode && isOurPkg))) continue
+            sendDiagnosticData("scanning_pkg", pkg)
 
             if (testMode && isOurPkg) {
                 Log.d(TAG, "🧪 Test mode: escaneando ventana propia")
@@ -281,6 +312,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
             // Phase 1: Click ACEPTAR via card isolation
             val cards = findOfferCards(root)
+            sendDiagnosticData("cards_found", cards.size.toString())
             if (cards.isNotEmpty()) {
                 for (card in cards) {
                     if (evaluateCard(card, windowContextStore)) {
@@ -302,30 +334,46 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 collectNodes(root, 0, 40, results, allText)
                 if (results.isNotEmpty()) {
                     val text = allText.toString()
-                    val textPreview = text.take(250).replace('\n', ' ')
+                    val textPreview = text.take(500).replace('\n', ' ')
                     Log.d(TAG, "📋 Flat scan text: \"$textPreview\"...")
                     val storeCodes = STORE_REGEX.findAll(text)
                         .map { it.groupValues[1] }.distinct().toList()
                     if (storeCodes.size > 1) {
                         Log.d(TAG, "📋 Flat scan: múltiples tiendas ($storeCodes), textos mezclados. Rechazando.")
                     } else {
+                        sendDiagnosticData("flat_scan_text", textPreview)
                         val blocked = containsBlockedOfferText(text)
                         val stopsOk = matchesInternalStops(text)
                         Log.d(TAG, "📋 Flat scan checks: blocked=$blocked stopsOk=$stopsOk storeCodes=$storeCodes")
                         val hasValidPrice = results.any { it.price >= minPrice && it.price > 0 }
                         val hasValidDistance = results.any { it.distance <= maxDistance }
                         val store = results.firstOrNull { it.store != null }?.store ?: windowContextStore
-                        if (hasValidPrice && hasValidDistance && storeMatches(store) && typeMatches(text)) {
+                        val typeOk = typeMatches(text)
+                        sendDiagnosticDataMap(mapOf(
+                            "flat_has_price" to hasValidPrice.toString(),
+                            "flat_has_distance" to hasValidDistance.toString(),
+                            "flat_store_matches" to storeMatches(store).toString(),
+                            "flat_type_matches" to typeOk.toString(),
+                            "flat_blocked" to blocked.toString(),
+                            "flat_stops_ok" to stopsOk.toString(),
+                        ))
+                        if (hasValidPrice && hasValidDistance && storeMatches(store) && typeOk) {
                             if (!blocked && stopsOk) {
                                 Log.d(TAG, "📋 Flat scan: oferta válida encontrada")
+                                sendDiagnosticData("scan_result", "valid_offer_found_flat")
                                 offerFound = true
                                 matchedRoot = root
                                 break
                             } else {
                                 Log.d(TAG, "📋 Flat scan: oferta rechazada por filtros")
+                                sendDiagnosticData("scan_result", "filtered_out_blocked_or_stops")
                             }
                         }
+                    } else {
+                        sendDiagnosticData("scan_result", "no_filter_match")
                     }
+                } else {
+                    sendDiagnosticData("flat_scan_text", "(empty)")
                 }
             }
 
@@ -347,14 +395,26 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             }
 
             // Phase 4: Chevron tap — tap top-right corner of matching cards
-            val canChevron = System.currentTimeMillis() - lastChevronTapMs >= chevronCooldownMs
-            if (canChevron && findAndTapOfferChevron(root)) {
-                lastChevronTapMs = System.currentTimeMillis()
-                actionTaken = true
-                chevronOpenedDetail = true
-                break
+            if (!matchedRootIsCard) {
+                val canChevron = System.currentTimeMillis() - lastChevronTapMs >= chevronCooldownMs
+                if (canChevron && findAndTapOfferChevron(root)) {
+                    lastChevronTapMs = System.currentTimeMillis()
+                    actionTaken = true
+                    chevronOpenedDetail = true
+                    break
+                }
+            }
             }
         }
+
+        // Send diagnostics summary
+        sendDiagnosticDataMap(mapOf(
+            "offer_found" to if (offerFound) "true" else "false",
+            "card_matched" to if (matchedRootIsCard) "true" else "false",
+            "action_taken" to if (actionTaken) "true" else "false",
+            "countdown_action" to if (countdownAction) "true" else "false",
+            "scrolled_for_accept" to if (scrolledForAccept) "true" else "false",
+        ))
 
         // Click ACEPTAR if found via card isolation or flat scan
         if (offerFound && matchedRoot != null && !countdownAction) {
@@ -432,6 +492,11 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                                 if (validNode != null) {
                                     val finalRect = Rect().also { validNode.getBoundsInScreen(it) }
                                     logToFlutter("🔍 Accept ('$kw' — full window) en: $finalRect")
+                                    sendDiagnosticDataMap(mapOf(
+                                        "accept_kw" to kw,
+                                        "accept_rect" to finalRect.toShortString(),
+                                        "accept_origin" to "full_window",
+                                    ))
                                     if (isOffScreenBelow(finalRect)) {
                                         logToFlutter("📜 Accept fuera de pantalla (y=${finalRect.bottom} > $screenHeightPx). Scrolleando...")
                                         scrolledForAccept = true
@@ -441,7 +506,10 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                                             val result = clickNode(nodeToClick, finalRect)
                                             if (result) {
                                                 logToFlutter("✅ ¡Accept completado!")
+                                                sendDiagnosticData("accept_result", "clicked_ok")
                                                 clicked = true
+                                            } else {
+                                                sendDiagnosticData("accept_result", "click_failed")
                                             }
                                         } finally {
                                             nodeToClick.recycle()
@@ -470,6 +538,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 if (manualNode != null) {
                     val finalRect = Rect().also { manualNode.getBoundsInScreen(it) }
                     logToFlutter("🔍 Accept (manual) en: $finalRect")
+                    sendDiagnosticData("accept_result", "found_manual_$finalRect")
                     if (isOffScreenBelow(finalRect)) {
                         logToFlutter("📜 Accept fuera de pantalla (y=${finalRect.bottom} > $screenHeightPx). Scrolleando...")
                         scrolledForAccept = true
@@ -479,11 +548,15 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                         manualNode.recycle()
                         if (result) {
                             logToFlutter("✅ ¡Accept completado!")
+                            sendDiagnosticData("accept_result", "clicked_ok_manual")
                             clicked = true
+                        } else {
+                            sendDiagnosticData("accept_result", "click_failed_manual")
                         }
                     }
                 } else {
                     logToFlutter("❌ No se encontró botón Accept en la pantalla")
+                    sendDiagnosticData("accept_result", "not_found")
                 }
             }
         }
@@ -654,12 +727,14 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         collectNodes(card, 0, 40, results, allText)
         if (results.isEmpty()) {
             Log.d(TAG, "📦 Card eval: sin texto accesible")
+            sendDiagnosticData("card_rejection", "sin_texto_accesible")
             return false
         }
 
         val text = allText.toString()
         val preview = text.take(120).replace('\n', ' ')
         Log.d(TAG, "📦 Card eval: \"$preview\"...")
+        sendDiagnosticData("card_text_preview", preview)
 
         // Safety: reject if text contains multiple store codes (container leak)
         val storeCodes = STORE_REGEX.findAll(text)
@@ -672,34 +747,40 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         // Fase 2 — Bloqueo "solo para ti"
         if (containsBlockedOfferText(text)) {
             Log.d(TAG, "📦 Card rechazada: contiene 'solo para ti'")
+            sendDiagnosticData("card_rejection", "solo_para_ti")
             return false
         }
 
         // Fase 2 — Paradas 1-5
         if (!matchesInternalStops(text)) {
             Log.d(TAG, "📦 Card rechazada: paradas fuera de rango (1-5)")
+            sendDiagnosticData("card_rejection", "paradas_fuera_de_rango")
             return false
         }
 
         val hasValidPrice = results.any { it.price >= minPrice && it.price > 0 }
         if (!hasValidPrice) {
             Log.d(TAG, "📦 Card rechazada: precio < $minPrice")
+            sendDiagnosticData("card_rejection", "precio_muy_bajo")
             return false
         }
         val hasValidDistance = results.any { it.distance <= maxDistance }
         if (!hasValidDistance) {
             Log.d(TAG, "📦 Card rechazada: distancia > $maxDistance")
+            sendDiagnosticData("card_rejection", "distancia_muy_alta")
             return false
         }
 
         val store = results.firstOrNull { it.store != null }?.store ?: windowContextStore
         if (!storeMatches(store)) {
             Log.d(TAG, "📦 Card rechazada: store $store != [$storeId]")
+            sendDiagnosticData("card_rejection", "tienda_no_coincide_${store}_vs_${storeId}")
             return false
         }
         val typeOk = typeMatches(text)
         if (!typeOk) {
             Log.d(TAG, "📦 Card rechazada: type no matchea ($orderType)")
+            sendDiagnosticData("card_rejection", "tipo_no_coincide")
         }
         return typeOk
     }
@@ -716,8 +797,15 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
         if (kws.isEmpty()) return true
         val folded = foldDiacritics(text).lowercase()
+
         return kws.any { kw ->
-            foldDiacritics(kw).lowercase().let { folded.contains(it) }
+            val nkw = foldDiacritics(kw).lowercase()
+            if (folded.contains(nkw)) return true
+
+            val synonyms = TYPE_SYNONYMS.entries.firstOrNull { nkw.contains(it.key) }?.value
+            if (synonyms != null && synonyms.any { folded.contains(it) }) return true
+
+            false
         }
     }
 

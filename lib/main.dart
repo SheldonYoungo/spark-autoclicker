@@ -12,6 +12,7 @@ import 'package:spark_autoclicker/features/admin/presentation/admin_dashboard.da
 import 'package:spark_autoclicker/features/automation/presentation/bot_main_screen.dart';
 import 'package:spark_autoclicker/features/automation/data/activation_service.dart';
 import 'package:spark_autoclicker/features/automation/data/filter_service.dart';
+import 'package:spark_autoclicker/features/automation/data/diagnostics_service.dart';
 import 'package:spark_autoclicker/features/overlay/presentation/overlay_screen.dart';
 
 void main() async {
@@ -47,6 +48,7 @@ void main() async {
   try {
     await ActivationService().init();
     await FilterService().loadFilters();
+    DiagnosticsService().init();
   } catch (e) {
     debugPrint("Error al inicializar servicios: $e");
   }
