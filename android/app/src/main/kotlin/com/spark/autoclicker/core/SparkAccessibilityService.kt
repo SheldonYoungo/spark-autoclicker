@@ -40,7 +40,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         var instance: SparkAccessibilityService? = null
 
         private val PRICE_REGEX = Regex("""\$\s*(\d+[\.,]\d+|\d+)""")
-        private val DISTANCE_REGEX = Regex("""(\d+[\.,]\d+|\d+)\s*(?:mi|mile|miles|millas)\b""", RegexOption.IGNORE_CASE)
+        private val DISTANCE_REGEX = Regex("""(\d+[\.,]\d+|\d+)\s*(?:mi|mile|miles|millas|m)\b""", RegexOption.IGNORE_CASE)
         private val STORE_REGEX = Regex("""#\s*(\d+)""")
         private val COUNTDOWN_REGEX = Regex("""disponible\s+en\s+(\d{1,2}):(\d{2})""", RegexOption.IGNORE_CASE)
         private val SOLO_PARA_TI_REGEX = Regex("""\bsolo\s+para\s+ti\b|\bjust\s+for\s+you\b""", RegexOption.IGNORE_CASE)
@@ -66,8 +66,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     private var storeId = ""
     private var orderType = ""
 
-    private var scanSpeedMs = 300
     private var lastClickTime = 0L
+    private val clickDebounce = 250L
 
     private var lastScrollAtMs = 0L
     private val scrollThrottleMs = 600L
@@ -96,12 +96,12 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private val acceptKeywords = listOf(
-        "accept", "aceptar"
+        "accept", "aceptar", "confirm", "confirmar", "tomar", "take it", "take order"
     )
 
     private val TYPE_SYNONYMS = mapOf(
-        "compra" to listOf("compra", "shopping", "groceries", "express", "envio", "entrega", "grocery", "delivery"),
-        "recolección" to listOf("recolección", "pickup", "curbside", "retiro", "recogida"),
+        "compra" to listOf("compra", "shopping", "groceries", "express", "envio", "entrega", "grocery"),
+        "recolección" to listOf("recolección", "pickup", "curbside", "delivery", "retiro", "recogida"),
         "multiviaje" to listOf("multiviaje", "batch", "multiple", "stops", "viaje", "multi"),
     )
 
@@ -109,7 +109,6 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         Log.d(TAG, message)
 
         val isCritical = message.startsWith("STATUS:") ||
-                         message.startsWith("DIAG:") ||
                          message.startsWith("✅") ||
                          message.startsWith("🤖") ||
                          message.startsWith("🛑") ||
@@ -235,11 +234,10 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         maxDistance = distance
         storeId = store
         orderType = type
-        scanSpeedMs = speed
 
         val statusText = if (active) "ON" else "OFF"
-        logToFlutter("🤖 Motor Nativo: Sincronización Automática -> $statusText | Speed=${speed}ms")
-        Log.d(TAG, "⚙️ Config: MinPrice=$price, Distance=$distance, Store=$store, Type=$type, Speed=${speed}ms")
+        logToFlutter("🤖 Motor Nativo: Sincronización Automática -> $statusText")
+        Log.d(TAG, "⚙️ Config: MinPrice=$price, Distance=$distance, Store=$store, Type=$type")
         sendDiagnosticDataMap(mapOf(
             "native_bot_active" to active.toString(),
             "native_min_price" to price.toString(),
@@ -261,7 +259,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         }
 
         val currentTime = System.currentTimeMillis()
-        if (currentTime - lastClickTime < scanSpeedMs) return
+        if (currentTime - lastClickTime < clickDebounce) return
 
         val roots = captureRootsOnUiThread()
         if (roots.isEmpty()) return
@@ -338,42 +336,34 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                     val textPreview = text.take(500).replace('\n', ' ')
                     Log.d(TAG, "📋 Flat scan text: \"$textPreview\"...")
                     sendDiagnosticData("flat_scan_text", textPreview)
-                    val storeCodes = STORE_REGEX.findAll(text)
-                        .map { it.groupValues[1] }.distinct().toList()
-                    if (storeCodes.size > 1) {
-                        Log.d(TAG, "📋 Flat scan: múltiples tiendas ($storeCodes), textos mezclados. Rechazando.")
-                    } else {
-                        val blocked = containsBlockedOfferText(text)
-                        val stopsOk = matchesInternalStops(text)
-                        Log.d(TAG, "📋 Flat scan checks: blocked=$blocked stopsOk=$stopsOk storeCodes=$storeCodes")
-                        val minFoundPrice = results.filter { it.price > 0 }.minOfOrNull { it.price } ?: 0.0
-                        val maxFoundDistance = results.filter { it.distance < 999.0 }.maxOfOrNull { it.distance } ?: 999.0
-                        val hasValidPrice = minFoundPrice >= minPrice && minFoundPrice > 0
-                        val hasValidDistance = maxFoundDistance <= maxDistance
-                        val store = results.firstOrNull { it.store != null }?.store ?: windowContextStore
-                        val typeOk = typeMatches(text)
-                        sendDiagnosticDataMap(mapOf(
-                            "flat_has_price" to hasValidPrice.toString(),
-                            "flat_has_distance" to hasValidDistance.toString(),
-                            "flat_store_matches" to storeMatches(store).toString(),
-                            "flat_type_matches" to typeOk.toString(),
-                            "flat_blocked" to blocked.toString(),
-                            "flat_stops_ok" to stopsOk.toString(),
-                        ))
-                        if (hasValidPrice && hasValidDistance && storeMatches(store) && typeOk) {
-                            if (!blocked && stopsOk) {
-                                Log.d(TAG, "📋 Flat scan: oferta válida encontrada")
-                                sendDiagnosticData("scan_result", "valid_offer_found_flat")
-                                offerFound = true
-                                matchedRoot = root
-                                break
-                            } else {
-                                Log.d(TAG, "📋 Flat scan: oferta rechazada por filtros")
-                                sendDiagnosticData("scan_result", "filtered_out_blocked_or_stops")
-                            }
+                    val blocked = containsBlockedOfferText(text)
+                    val stopsOk = matchesInternalStops(text)
+                    Log.d(TAG, "📋 Flat scan checks: blocked=$blocked stopsOk=$stopsOk")
+                    val hasValidPrice = results.any { it.price >= minPrice && it.price > 0 }
+                    val hasValidDistance = results.any { it.distance <= maxDistance }
+                    val store = results.firstOrNull { it.store != null }?.store ?: windowContextStore
+                    val typeOk = typeMatches(text)
+                    sendDiagnosticDataMap(mapOf(
+                        "flat_has_price" to hasValidPrice.toString(),
+                        "flat_has_distance" to hasValidDistance.toString(),
+                        "flat_store_matches" to storeMatches(store).toString(),
+                        "flat_type_matches" to typeOk.toString(),
+                        "flat_blocked" to blocked.toString(),
+                        "flat_stops_ok" to stopsOk.toString(),
+                    ))
+                    if (hasValidPrice && hasValidDistance && storeMatches(store) && typeOk) {
+                        if (!blocked && stopsOk) {
+                            Log.d(TAG, "📋 Flat scan: oferta válida encontrada")
+                            sendDiagnosticData("scan_result", "valid_offer_found_flat")
+                            offerFound = true
+                            matchedRoot = root
+                            break
                         } else {
-                            sendDiagnosticData("scan_result", "no_filter_match")
+                            Log.d(TAG, "📋 Flat scan: oferta rechazada por filtros")
+                            sendDiagnosticData("scan_result", "filtered_out_blocked_or_stops")
                         }
+                    } else {
+                        sendDiagnosticData("scan_result", "no_filter_match")
                     }
                 } else {
                     sendDiagnosticData("flat_scan_text", "(empty)")
@@ -398,12 +388,14 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             }
 
             // Phase 4: Chevron tap — tap top-right corner of matching cards
-            val canChevron = System.currentTimeMillis() - lastChevronTapMs >= chevronCooldownMs
-            if (canChevron && findAndTapOfferChevron(root)) {
-                lastChevronTapMs = System.currentTimeMillis()
-                actionTaken = true
-                chevronOpenedDetail = true
-                break
+            if (!matchedRootIsCard) {
+                val canChevron = System.currentTimeMillis() - lastChevronTapMs >= chevronCooldownMs
+                if (canChevron && findAndTapOfferChevron(root)) {
+                    lastChevronTapMs = System.currentTimeMillis()
+                    actionTaken = true
+                    chevronOpenedDetail = true
+                    break
+                }
             }
         }
 
@@ -563,7 +555,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
         // Post-chevron: recapture roots and search ACEPTAR on the detail screen
         if (chevronOpenedDetail && !countdownAction) {
-            delay(600)
+            kotlinx.coroutines.delay(600)
             val freshRoots = captureRootsOnUiThread()
             try {
                 logToFlutter("🔍 Buscando Accept tras chevron en ${freshRoots.size} ventana(s)...")
@@ -680,13 +672,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     ) {
         if (node == null || depth > maxDepth) return
         if (isCardSized(node, screenWidth) && hasDollarSign(node)) {
-            val text = collectNodeText(node, 600)
-            val storeCodes = STORE_REGEX.findAll(text)
-                .map { it.groupValues[1] }.distinct().toList()
-            if (storeCodes.size <= 1) {
-                cards.add(AccessibilityNodeInfo.obtain(node))
-                return
-            }
+            cards.add(AccessibilityNodeInfo.obtain(node))
+            return
         }
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
@@ -700,12 +687,9 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         if (rect.isEmpty) return false
         val width = rect.width()
         val height = rect.height()
-        val minWidth = (screenWidth * 0.30).toInt()
-        val maxWidth = (screenWidth * 0.95).toInt()
-        if (width !in minWidth..maxWidth || height !in 80..1200) return false
-        val area = width.toLong() * height.toLong()
-        val screenArea = screenWidth.toLong() * screenHeightPx.toLong()
-        return area <= screenArea * 0.60
+        val minWidth = (screenWidth * 0.20).toInt()
+        val maxWidth = (screenWidth * 0.98).toInt()
+        return width in minWidth..maxWidth && height in 80..2000
     }
 
     private fun hasDollarSign(node: AccessibilityNodeInfo): Boolean {
@@ -736,15 +720,6 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         Log.d(TAG, "📦 Card eval: \"$preview\"...")
         sendDiagnosticData("card_text_preview", preview)
 
-        // Safety: reject if text contains multiple store codes (container leak)
-        val storeCodes = STORE_REGEX.findAll(text)
-            .map { it.groupValues[1] }.distinct().toList()
-        if (storeCodes.size > 1) {
-            Log.d(TAG, "📦 Card rechazada: múltiples tiendas ($storeCodes), posible contenedor")
-            sendDiagnosticData("card_rejection", "multi_tienda_$storeCodes")
-            return false
-        }
-
         // Fase 2 — Bloqueo "solo para ti"
         if (containsBlockedOfferText(text)) {
             Log.d(TAG, "📦 Card rechazada: contiene 'solo para ti'")
@@ -759,28 +734,16 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             return false
         }
 
-        // Fase 2 — Shape check ($, millas, paradas)
-        val hasDollar = PRICE_REGEX.containsMatchIn(text) || results.any { it.price > 0 }
-        val hasMillas = DISTANCE_REGEX.containsMatchIn(text) || results.any { it.distance < 999.0 }
-        val hasParadas = PARADAS_REGEX.containsMatchIn(text)
-        if (!(hasDollar && hasMillas && hasParadas)) {
-            Log.d(TAG, "📦 Card rechazada: no tiene forma de oferta (falta $, millas o paradas)")
-            sendDiagnosticData("card_rejection", "sin_shape_oferta")
+        val hasValidPrice = results.any { it.price >= minPrice && it.price > 0 }
+        if (!hasValidPrice) {
+            Log.d(TAG, "📦 Card rechazada: precio < $minPrice")
+            sendDiagnosticData("card_rejection", "precio_muy_bajo")
             return false
         }
-
-        // Extracción pesimista: asume el peor precio y la peor distancia de todo lo encontrado en el card
-        val minFoundPrice = results.filter { it.price > 0 }.minOfOrNull { it.price } ?: 0.0
-        if (minFoundPrice < minPrice || minFoundPrice <= 0) {
-            Log.d(TAG, "📦 Card rechazada: precio peor caso ($minFoundPrice) < $minPrice")
-            sendDiagnosticData("card_rejection", "precio_muy_bajo_$minFoundPrice")
-            return false
-        }
-
-        val maxFoundDistance = results.filter { it.distance < 999.0 }.maxOfOrNull { it.distance } ?: 999.0
-        if (maxFoundDistance > maxDistance) {
-            Log.d(TAG, "📦 Card rechazada: distancia peor caso ($maxFoundDistance) > $maxDistance")
-            sendDiagnosticData("card_rejection", "distancia_muy_alta_$maxFoundDistance")
+        val hasValidDistance = results.any { it.distance <= maxDistance }
+        if (!hasValidDistance) {
+            Log.d(TAG, "📦 Card rechazada: distancia > $maxDistance")
+            sendDiagnosticData("card_rejection", "distancia_muy_alta")
             return false
         }
 
@@ -810,6 +773,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         val kws = orderType.split(",").map { it.trim() }.filter { it.isNotBlank() }
         if (kws.isEmpty()) return true
         val folded = foldDiacritics(text).lowercase()
+
         return kws.any { kw ->
             val nkw = foldDiacritics(kw).lowercase()
             if (folded.contains(nkw)) return true
@@ -934,20 +898,12 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     private fun nodeMatchesFilters(text: String): Boolean {
         if (containsBlockedOfferText(text)) return false
         if (!matchesInternalStops(text)) return false
-        // Reject mixed-card text (multiple store codes = multiple cards)
-        val storeCodes = STORE_REGEX.findAll(text)
-            .map { it.groupValues[1] }.distinct().toList()
-        if (storeCodes.size > 1) {
-            Log.d(TAG, "📋 Chevron skip: múltiples tiendas ($storeCodes), textos mezclados")
-            return false
-        }
-        val prices = PRICE_REGEX.findAll(text).mapNotNull { it.groupValues[1].replace(",", ".").toDoubleOrNull() }.toList()
-        val minFoundPrice = if (prices.isNotEmpty()) prices.minOrNull() ?: 0.0 else 0.0
-        if (minFoundPrice < minPrice || minFoundPrice <= 0) return false
-
-        val distances = DISTANCE_REGEX.findAll(text).mapNotNull { it.groupValues[1].replace(",", ".").toDoubleOrNull() }.toList()
-        val maxFoundDistance = if (distances.isNotEmpty()) distances.maxOrNull() ?: 999.0 else 999.0
-        if (maxFoundDistance > maxDistance) return false
+        val price = PRICE_REGEX.find(text)?.groupValues?.get(1)
+            ?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
+        if (price < minPrice || price <= 0) return false
+        val distance = DISTANCE_REGEX.find(text)?.groupValues?.get(1)
+            ?.replace(",", ".")?.toDoubleOrNull() ?: 999.0
+        if (distance > maxDistance) return false
         val store = STORE_REGEX.find(text)?.groupValues?.get(1)
         if (!storeMatches(store)) return false
         return typeMatches(text)
@@ -1020,13 +976,12 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             for (i in 1..3) {
                 try {
                     clickAceptarInRoot(root)
-                    delay(50)
+                    kotlinx.coroutines.delay(50)
                 } catch (_: Exception) {}
             }
             logToFlutter("✅ Clicks de emergencia realizados")
             return TimedOfferState.PRECLICKED
         }
-        
         if (totalSeconds > 30) return TimedOfferState.PRESENT
         val waitMs = (totalSeconds * 1000L) + 1000L
         logToFlutter("⏳ Countdown: ${minutes}m ${seconds}s, esperando ${totalSeconds}s...")
