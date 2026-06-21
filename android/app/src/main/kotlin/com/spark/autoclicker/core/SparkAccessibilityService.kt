@@ -40,7 +40,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         var instance: SparkAccessibilityService? = null
 
         private val PRICE_REGEX = Regex("""\$\s*(\d+[\.,]\d+|\d+)""")
-        private val DISTANCE_REGEX = Regex("""(\d+[\.,]\d+|\d+)\s*(?:mi|mile|miles|millas|m)\b""", RegexOption.IGNORE_CASE)
+        private val DISTANCE_REGEX = Regex("""(\d+[\.,]\d+|\d+)\s*(?:mi|mile|miles|millas)\b""", RegexOption.IGNORE_CASE)
         private val STORE_REGEX = Regex("""#\s*(\d+)""")
         private val COUNTDOWN_REGEX = Regex("""disponible\s+en\s+(\d{1,2}):(\d{2})""", RegexOption.IGNORE_CASE)
         private val SOLO_PARA_TI_REGEX = Regex("""\bsolo\s+para\s+ti\b|\bjust\s+for\s+you\b""", RegexOption.IGNORE_CASE)
@@ -96,12 +96,12 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     private val acceptKeywords = listOf(
-        "accept", "aceptar", "confirm", "confirmar", "tomar", "take it", "take order"
+        "accept", "aceptar"
     )
 
     private val TYPE_SYNONYMS = mapOf(
-        "compra" to listOf("compra", "shopping", "groceries", "express", "envio", "entrega", "grocery"),
-        "recolección" to listOf("recolección", "pickup", "curbside", "delivery", "retiro", "recogida"),
+        "compra" to listOf("compra", "shopping", "groceries", "express", "envio", "entrega", "grocery", "delivery"),
+        "recolección" to listOf("recolección", "pickup", "curbside", "retiro", "recogida"),
         "multiviaje" to listOf("multiviaje", "batch", "multiple", "stops", "viaje", "multi"),
     )
 
@@ -346,8 +346,10 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                         val blocked = containsBlockedOfferText(text)
                         val stopsOk = matchesInternalStops(text)
                         Log.d(TAG, "📋 Flat scan checks: blocked=$blocked stopsOk=$stopsOk storeCodes=$storeCodes")
-                        val hasValidPrice = results.any { it.price >= minPrice && it.price > 0 }
-                        val hasValidDistance = results.any { it.distance <= maxDistance }
+                        val minFoundPrice = results.filter { it.price > 0 }.minOfOrNull { it.price } ?: 0.0
+                        val maxFoundDistance = results.filter { it.distance < 999.0 }.maxOfOrNull { it.distance } ?: 999.0
+                        val hasValidPrice = minFoundPrice >= minPrice && minFoundPrice > 0
+                        val hasValidDistance = maxFoundDistance <= maxDistance
                         val store = results.firstOrNull { it.store != null }?.store ?: windowContextStore
                         val typeOk = typeMatches(text)
                         sendDiagnosticDataMap(mapOf(
@@ -757,16 +759,28 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             return false
         }
 
-        val hasValidPrice = results.any { it.price >= minPrice && it.price > 0 }
-        if (!hasValidPrice) {
-            Log.d(TAG, "📦 Card rechazada: precio < $minPrice")
-            sendDiagnosticData("card_rejection", "precio_muy_bajo")
+        // Fase 2 — Shape check ($, millas, paradas)
+        val hasDollar = PRICE_REGEX.containsMatchIn(text) || results.any { it.price > 0 }
+        val hasMillas = DISTANCE_REGEX.containsMatchIn(text) || results.any { it.distance < 999.0 }
+        val hasParadas = PARADAS_REGEX.containsMatchIn(text)
+        if (!(hasDollar && hasMillas && hasParadas)) {
+            Log.d(TAG, "📦 Card rechazada: no tiene forma de oferta (falta $, millas o paradas)")
+            sendDiagnosticData("card_rejection", "sin_shape_oferta")
             return false
         }
-        val hasValidDistance = results.any { it.distance <= maxDistance }
-        if (!hasValidDistance) {
-            Log.d(TAG, "📦 Card rechazada: distancia > $maxDistance")
-            sendDiagnosticData("card_rejection", "distancia_muy_alta")
+
+        // Extracción pesimista: asume el peor precio y la peor distancia de todo lo encontrado en el card
+        val minFoundPrice = results.filter { it.price > 0 }.minOfOrNull { it.price } ?: 0.0
+        if (minFoundPrice < minPrice || minFoundPrice <= 0) {
+            Log.d(TAG, "📦 Card rechazada: precio peor caso ($minFoundPrice) < $minPrice")
+            sendDiagnosticData("card_rejection", "precio_muy_bajo_$minFoundPrice")
+            return false
+        }
+
+        val maxFoundDistance = results.filter { it.distance < 999.0 }.maxOfOrNull { it.distance } ?: 999.0
+        if (maxFoundDistance > maxDistance) {
+            Log.d(TAG, "📦 Card rechazada: distancia peor caso ($maxFoundDistance) > $maxDistance")
+            sendDiagnosticData("card_rejection", "distancia_muy_alta_$maxFoundDistance")
             return false
         }
 
@@ -927,12 +941,13 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             Log.d(TAG, "📋 Chevron skip: múltiples tiendas ($storeCodes), textos mezclados")
             return false
         }
-        val price = PRICE_REGEX.find(text)?.groupValues?.get(1)
-            ?.replace(",", ".")?.toDoubleOrNull() ?: 0.0
-        if (price < minPrice || price <= 0) return false
-        val distance = DISTANCE_REGEX.find(text)?.groupValues?.get(1)
-            ?.replace(",", ".")?.toDoubleOrNull() ?: 999.0
-        if (distance > maxDistance) return false
+        val prices = PRICE_REGEX.findAll(text).mapNotNull { it.groupValues[1].replace(",", ".").toDoubleOrNull() }.toList()
+        val minFoundPrice = if (prices.isNotEmpty()) prices.minOrNull() ?: 0.0 else 0.0
+        if (minFoundPrice < minPrice || minFoundPrice <= 0) return false
+
+        val distances = DISTANCE_REGEX.findAll(text).mapNotNull { it.groupValues[1].replace(",", ".").toDoubleOrNull() }.toList()
+        val maxFoundDistance = if (distances.isNotEmpty()) distances.maxOrNull() ?: 999.0 else 999.0
+        if (maxFoundDistance > maxDistance) return false
         val store = STORE_REGEX.find(text)?.groupValues?.get(1)
         if (!storeMatches(store)) return false
         return typeMatches(text)
@@ -999,8 +1014,19 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         val match = COUNTDOWN_REGEX.find(text) ?: return TimedOfferState.NONE
         val minutes = match.groupValues[1].toIntOrNull() ?: return TimedOfferState.NONE
         val seconds = match.groupValues[2].toIntOrNull() ?: return TimedOfferState.NONE
-        if (minutes == 0 && seconds <= 3) return TimedOfferState.NONE
         val totalSeconds = minutes * 60 + seconds
+        if (totalSeconds <= 3) {
+            logToFlutter("⏳ Countdown expirado o crítico ($totalSeconds s), intentando clicks urgentes...")
+            for (i in 1..3) {
+                try {
+                    clickAceptarInRoot(root)
+                    delay(50)
+                } catch (_: Exception) {}
+            }
+            logToFlutter("✅ Clicks de emergencia realizados")
+            return TimedOfferState.PRECLICKED
+        }
+        
         if (totalSeconds > 30) return TimedOfferState.PRESENT
         val waitMs = (totalSeconds * 1000L) + 1000L
         logToFlutter("⏳ Countdown: ${minutes}m ${seconds}s, esperando ${totalSeconds}s...")
