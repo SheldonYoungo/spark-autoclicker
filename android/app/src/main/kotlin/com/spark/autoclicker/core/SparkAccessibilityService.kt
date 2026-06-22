@@ -352,11 +352,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                     ))
                     if (hasValidPrice && hasValidDistance && storeMatches(store) && typeOk) {
                         if (!blocked && stopsOk) {
-                            Log.d(TAG, "📋 Flat scan: oferta válida encontrada")
-                            sendDiagnosticData("scan_result", "valid_offer_found_flat")
-                            offerFound = true
-                            matchedRoot = root
-                            break
+                            Log.d(TAG, "📋 Flat scan: detected (chevron only, no accept)")
+                            sendDiagnosticData("scan_result", "flat_detected_chevron_only")
                         } else {
                             Log.d(TAG, "📋 Flat scan: oferta rechazada por filtros")
                             sendDiagnosticData("scan_result", "filtered_out_blocked_or_stops")
@@ -406,7 +403,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             "scrolled_for_accept" to if (scrolledForAccept) "true" else "false",
         ))
 
-        // Click ACEPTAR if found via card isolation or flat scan
+        // Click ACEPTAR if found via card isolation (flat scan cannot scope accept button)
         if (offerFound && matchedRoot != null && !countdownAction) {
             logToFlutter("🎯 Oferta válida encontrada. Buscando botón Accept...")
             var clicked = false
@@ -447,68 +444,10 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 if (clicked) break
             }
 
-            // Step 2: Fallback — search ALL walmart windows (ACEPTAR may be outside the card)
+            // Step 2: DFS manual within matchedRoot only (no full-window — unsafe across cards)
             if (!clicked) {
-                for (kw in acceptKeywords) {
-                    if (clicked) break
-                    for (root in roots) {
-                        val pkg = root.packageName?.toString() ?: ""
-                        if (!(pkg.contains("walmart", ignoreCase = true) || (testMode && pkg == "com.spark.autoclicker"))) continue
-
-                        val nodes = root.findAccessibilityNodeInfosByText(kw)
-                        try {
-                            if (nodes.isNotEmpty()) {
-                                val validNode = nodes.firstOrNull { node ->
-                                    val rect = Rect().also { node.getBoundsInScreen(it) }
-                                    val isNotTooGiant = rect.width() < 2000 && rect.height() < 500
-                                    !rect.isEmpty && isNotTooGiant
-                                }
-                                if (validNode != null) {
-                                    val finalRect = Rect().also { validNode.getBoundsInScreen(it) }
-                                    logToFlutter("🔍 Accept ('$kw' — full window) en: $finalRect")
-                                    sendDiagnosticDataMap(mapOf(
-                                        "accept_kw" to kw,
-                                        "accept_rect" to finalRect.toShortString(),
-                                        "accept_origin" to "full_window",
-                                    ))
-                                    if (isOffScreenBelow(finalRect)) {
-                                        logToFlutter("📜 Accept fuera de pantalla (y=${finalRect.bottom} > $screenHeightPx). Scrolleando...")
-                                        scrolledForAccept = true
-                                    } else {
-                                        val nodeToClick = AccessibilityNodeInfo.obtain(validNode)
-                                        try {
-                                            val result = clickNode(nodeToClick, finalRect)
-                                            if (result) {
-                                                logToFlutter("✅ ¡Accept completado!")
-                                                sendDiagnosticData("accept_result", "clicked_ok")
-                                                clicked = true
-                                            } else {
-                                                sendDiagnosticData("accept_result", "click_failed")
-                                            }
-                                        } finally {
-                                            nodeToClick.recycle()
-                                        }
-                                    }
-                                }
-                            }
-                        } finally {
-                            safeRecycleAll(nodes as List<AccessibilityNodeInfo?>)
-                        }
-                        if (clicked) break
-                    }
-                }
-            }
-
-            // Step 3: DFS manual — search matchedRoot first, then fallback to all roots
-            if (!clicked) {
-                logToFlutter("⚠️ Búsqueda nativa falló. Buscando manualmente...")
+                logToFlutter("⚠️ Búsqueda nativa falló. Buscando manualmente en card...")
                 val manualNode = findAcceptNodeManually(matchedRoot)
-                    ?: roots.firstNotNullOfOrNull { root ->
-                        val pkg = root.packageName?.toString() ?: ""
-                        if (pkg.contains("walmart", ignoreCase = true) || (testMode && pkg == "com.spark.autoclicker"))
-                            findAcceptNodeManually(root)
-                        else null
-                    }
                 if (manualNode != null) {
                     val finalRect = Rect().also { manualNode.getBoundsInScreen(it) }
                     logToFlutter("🔍 Accept (manual) en: $finalRect")
@@ -529,8 +468,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                         }
                     }
                 } else {
-                    logToFlutter("❌ No se encontró botón Accept en la pantalla")
-                    sendDiagnosticData("accept_result", "not_found")
+                    logToFlutter("❌ No se encontró botón Accept en la tarjeta")
+                    sendDiagnosticData("accept_result", "not_found_in_card")
                 }
             }
         }
@@ -624,8 +563,15 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         val width = rect.width()
         val height = rect.height()
         val minWidth = (screenWidth * 0.20).toInt()
-        val maxWidth = (screenWidth * 0.98).toInt()
-        return width in minWidth..maxWidth && height in 80..2000
+        if (width < minWidth) return false
+
+        val className = node.className?.toString() ?: ""
+        val isCardView = className.contains("CardView", ignoreCase = true)
+
+        if (isCardView) {
+            return width <= screenWidth && height in 80..2000
+        }
+        return width <= (screenWidth * 0.92).toInt() && height in 80..700
     }
 
     private fun hasDollarSign(node: AccessibilityNodeInfo): Boolean {
