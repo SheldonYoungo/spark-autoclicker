@@ -127,8 +127,10 @@ class _BotMainScreenState extends State<BotMainScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       debugPrint(
-          "BotMainScreen: App RESUMED -> Forzando sincronización con SharedPreferences");
+          "BotMainScreen: App RESUMED -> Forzando sincronización");
+      if (mounted) setState(() => _isActivating = false);
       _filterService.loadFilters(forceReload: true);
+      _checkBatteryOptimizations();
     }
   }
 
@@ -617,7 +619,7 @@ class _BotMainScreenState extends State<BotMainScreen>
                 runSpacing: 12,
                 alignment: WrapAlignment.center,
                 children: options.map((opt) {
-                  final isSelected = tempTypes.contains(opt);
+                  final isSelected = tempTypes.any((t) => t.toLowerCase() == opt);
                   return FilterChip(
                     label: Text(opt.toUpperCase()),
                     selected: isSelected,
@@ -1011,7 +1013,7 @@ class _BotMainScreenState extends State<BotMainScreen>
             }
             if (mounted) setState(() => _isActivating = true);
             try {
-              await _filterService.toggleBot(!isActive);
+              await _filterService.toggleBot(!isActive).timeout(const Duration(seconds: 10));
             } catch (e) {
               debugPrint("BotMainScreen: Error en toggleBot: $e");
             } finally {

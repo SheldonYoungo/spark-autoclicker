@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'activation_service.dart';
 import 'filter_service.dart';
 
@@ -13,9 +14,17 @@ class DiagnosticsService {
   final FirebaseDatabase _db = FirebaseDatabase.instance;
   final Map<String, dynamic> _data = {};
   bool _initialized = false;
+  late bool _enabled;
   String? _deviceId;
+  DateTime? _lastFlushTime;
+  static const _minFlushInterval = Duration(seconds: 5);
 
   void init() {
+    _enabled = dotenv.get('DIAGNOSTICS_ENABLED') == 'true';
+    if (!_enabled) {
+      debugPrint("DiagnosticsService: desactivado por env");
+      return;
+    }
     if (_initialized) return;
     _initialized = true;
     Timer.periodic(const Duration(seconds: 15), (_) => flush());
@@ -51,12 +60,20 @@ class DiagnosticsService {
 
   void set(String key, dynamic value) {
     _data[key] = value;
-    if (key == 'scan_result' || key == 'accept_result' || key == 'rejection_reason') {
+    if (_enabled && (key == 'scan_result' || key == 'accept_result' || key == 'rejection_reason')) {
       flush();
     }
   }
 
   Future<void> flush() async {
+    if (!_enabled) return;
+
+    if (_lastFlushTime != null &&
+        DateTime.now().difference(_lastFlushTime!) < _minFlushInterval) {
+      return;
+    }
+    _lastFlushTime = DateTime.now();
+
     try {
       if (_deviceId == null) await _collectDeviceInfo();
       final safeId = (_deviceId ?? 'unknown').replaceAll(RegExp(r'[.#$\[\]]'), '_');
