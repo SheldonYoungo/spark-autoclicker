@@ -203,6 +203,16 @@ class FilterService {
           await AccessibilityUtil.openSettings();
           return;
         }
+
+        bool healthy = await AccessibilityUtil.isServiceHealthy();
+        if (!healthy) {
+          debugPrint("FilterService: Servicio no responde, mostrando guía de recuperación.");
+          _overlayEventController.add({
+            'type': 'service_unhealthy',
+            'message': 'El servicio de accesibilidad no responde. Ve a Configuración → Accesibilidad → Spark Autoclicker y actívalo.'
+          });
+          return;
+        }
       }
       
       bool isValid = await isSessionValid();

@@ -10,11 +10,17 @@ import kotlin.random.Random
 import android.os.Handler
 import android.os.Looper
 import android.graphics.Rect
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.os.Build
 import android.util.DisplayMetrics
 import android.view.WindowManager
 import org.json.JSONObject
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -47,6 +53,14 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         private val PARADAS_REGEX = Regex("""(\d+)\s*(?:paradas?|stops?)""", RegexOption.IGNORE_CASE)
         private const val MIN_PARADAS = 1
         private const val MAX_PARADAS = 5
+        private const val NOTIFICATION_CHANNEL_ID = "spark_bot_service"
+        private const val NOTIFICATION_ID = 9001
+
+        init {
+            Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+                Log.e(TAG, "🔥 Uncaught exception en ${thread.name}: ${throwable.message}")
+            }
+        }
     }
 
     private data class ScanResult(
@@ -93,7 +107,11 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
     private var prefs: SharedPreferences? = null
 
-    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Log.e(TAG, "🔥 Coroutine exception: ${throwable.message}")
+    }
+
+    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob() + exceptionHandler)
 
     private val acceptKeywords = listOf(
         "accept", "aceptar", "confirm", "confirmar", "tomar", "take it", "take order"
@@ -168,6 +186,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         super.onServiceConnected()
 
         instance = this
+        createNotificationChannel()
 
         prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs?.registerOnSharedPreferenceChangeListener(this)
@@ -175,6 +194,54 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         syncWithPrefs()
 
         logToFlutter("✅ Servicio de Accesibilidad Vinculado (Sync Nativa OK)")
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "Spark Bot",
+                NotificationManager.IMPORTANCE_MIN
+            ).apply {
+                description = "Mantiene el bot activo escaneando ofertas"
+                setShowBadge(false)
+            }
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.createNotificationChannel(channel)
+        }
+    }
+
+    private fun buildNotification(): android.app.Notification {
+        val openIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            android.app.Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
+        } else {
+            android.app.Notification.Builder(this)
+        }
+        return builder
+            .setContentTitle("Spark Bot")
+            .setContentText("Escaneando ofertas...")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setPriority(android.app.Notification.PRIORITY_MIN)
+            .build()
+    }
+
+    private fun updateForeground(active: Boolean) {
+        try {
+            if (active) {
+                startForeground(NOTIFICATION_ID, buildNotification())
+            } else {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error en foreground: ${e.message}")
+        }
     }
 
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
@@ -229,6 +296,9 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     }
 
     fun updateConfig(active: Boolean, price: Double, distance: Double, store: String, type: String, speed: Int) {
+        if (active != isBotActive) {
+            updateForeground(active)
+        }
         isBotActive = active
         minPrice = price
         maxDistance = distance
@@ -1005,10 +1075,11 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     }
 
     override fun onDestroy() {
-        super.onDestroy()
-        prefs?.unregisterOnSharedPreferenceChangeListener(this)
-        prefs?.edit()?.putBoolean("flutter.is_bot_active_state", false)?.apply()
-        logToFlutter("💀 Servicio destruido")
+        try {
+            prefs?.unregisterOnSharedPreferenceChangeListener(this)
+            prefs?.edit()?.putBoolean("flutter.is_bot_active_state", false)?.commit()
+        } catch (_: Exception) {}
         instance = null
+        Log.d(TAG, "💀 Servicio destruido")
     }
 }

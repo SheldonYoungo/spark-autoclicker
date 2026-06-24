@@ -45,6 +45,17 @@ class AccessibilityUtil {
     _onNativeLog = null;
   }
 
+  /// Verifica si el servicio de accesibilidad está activo y respondiendo
+  static Future<bool> isServiceHealthy() async {
+    try {
+      final bool? healthy = await _channel.invokeMethod('checkServiceHealth');
+      return healthy ?? false;
+    } catch (e) {
+      debugPrint("Error verificando salud del servicio: $e");
+      return false;
+    }
+  }
+
   /// Verifica si el servicio de accesibilidad está activado
   static Future<bool> isServiceEnabled() async {
     try {

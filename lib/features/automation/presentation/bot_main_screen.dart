@@ -50,6 +50,9 @@ class _BotMainScreenState extends State<BotMainScreen>
       if (event == 'refresh_filters') {
         _filterService.loadFilters(forceReload: true);
       }
+      if (event is Map && event['type'] == 'service_unhealthy') {
+        _showAccessibilityGuide();
+      }
     });
 
     // Log diagnóstico: verificar que el notifier cambia cuando el Overlay hace toggle
@@ -72,6 +75,48 @@ class _BotMainScreenState extends State<BotMainScreen>
     } catch (e) {
       debugPrint("Error verificando optimización de batería: $e");
     }
+  }
+
+  void _showAccessibilityGuide() {
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      builder: (context) => _StyledModalContainer(
+        title: 'Servicio de Accesibilidad',
+        subtitle: 'El servicio de accesibilidad no está activo o no responde.',
+        buttonText: 'Abrir Configuración',
+        onSave: () async {
+          Navigator.pop(context);
+          await AccessibilityUtil.openSettings();
+        },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.accessibility_new_rounded,
+              size: 72,
+              color: Colors.orangeAccent,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Sigue estos pasos para reactivar el bot:',
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            _GuideStep(step: '1', text: 'Abre Configuración'),
+            _GuideStep(step: '2', text: 'Ve a Accesibilidad → Servicios Instalados'),
+            _GuideStep(step: '3', text: 'Busca "Spark Autoclicker" y actívalo'),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showBatteryOptimizationWarning() {
@@ -197,14 +242,14 @@ class _BotMainScreenState extends State<BotMainScreen>
         child: StatefulBuilder(builder: (context, setModalState) {
           return _StyledModalContainer(
             title: 'Código de Tienda',
-            subtitle: 'Ingresa el código de 4 dígitos',
+            subtitle: 'Ingresa el código de máximo 5 dígitos',
             hasErrorNotifier: errorNotifier,
             onSave: () async {
               final val = inputController.text.trim();
               if (val.isNotEmpty) {
-                if (val.length != 4) {
+                if (val.length > 5) {
                   setModalState(() {
-                    localError = '⚠️ El código debe tener exactamente 4 dígitos.';
+                    localError = '⚠️ El código debe tener máximo 5 dígitos.';
                   });
                   errorNotifier.value = true;
                   await Future.delayed(const Duration(milliseconds: 1000));
@@ -268,7 +313,7 @@ class _BotMainScreenState extends State<BotMainScreen>
                         keyboardType: TextInputType.number,
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(4),
+                          LengthLimitingTextInputFormatter(5),
                         ],
                         style: const TextStyle(
                             color: Colors.white,
@@ -289,7 +334,7 @@ class _BotMainScreenState extends State<BotMainScreen>
                           hintStyle: const TextStyle(color: Colors.white24),
                         ),
                         onSubmitted: (val) {
-                          if (val.length == 4) {
+                          if (val.length >= 1 && val.length <= 5) {
                             setModalState(() {
                               localError = null;
                               validStores.clear();
@@ -300,38 +345,39 @@ class _BotMainScreenState extends State<BotMainScreen>
                         },
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: AppColors.primarySpark.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: IconButton(
-                        icon: const Icon(Icons.add,
-                            color: AppColors.primarySpark,
-                            size: 28),
-                        onPressed: () {
-                          final val = inputController.text.trim();
-                          if (val.length == 4) {
-                            setModalState(() {
-                              localError = null;
-                              validStores.clear();
-                              validStores.add(val);
-                              inputController.clear();
-                            });
-                          } else if (val.length > 0 && val.length < 4) {
-                            setModalState(() {
-                              localError = '⚠️ El código debe tener 4 dígitos';
-                            });
-                            Future.delayed(const Duration(seconds: 2), () {
-                              if (context.mounted) {
-                                setModalState(() { localError = null; });
-                              }
-                            });
-                          }
-                        },
-                      ),
-                    )
+                    // FUTURE MULTI-TIENDA: Restaurar botón + para agregar múltiples tiendas
+                    // const SizedBox(width: 8),
+                    // Container(
+                    //   decoration: BoxDecoration(
+                    //     color: AppColors.primarySpark.withValues(alpha: 0.1),
+                    //     borderRadius: BorderRadius.circular(16),
+                    //   ),
+                    //   child: IconButton(
+                    //     icon: const Icon(Icons.add,
+                    //         color: AppColors.primarySpark,
+                    //         size: 28),
+                    //     onPressed: () {
+                    //       final val = inputController.text.trim();
+                    //       if (val.length >= 1 && val.length <= 5) {
+                    //         setModalState(() {
+                    //           localError = null;
+                    //           validStores.clear();
+                    //           validStores.add(val);
+                    //           inputController.clear();
+                    //         });
+                    //       } else if (val.length > 0) {
+                    //         setModalState(() {
+                    //           localError = '⚠️ El código debe tener máximo 5 dígitos';
+                    //         });
+                    //         Future.delayed(const Duration(seconds: 2), () {
+                    //           if (context.mounted) {
+                    //             setModalState(() { localError = null; });
+                    //           }
+                    //         });
+                    //       }
+                    //     },
+                    //   ),
+                    // )
                   ],
                 ),
               ],
@@ -1398,6 +1444,43 @@ class _StyledModalContainer extends StatelessWidget {
                     child: Text(buttonText.toUpperCase(),
                         style: const TextStyle(fontWeight: FontWeight.bold)),
                   ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GuideStep extends StatelessWidget {
+  final String step;
+  final String text;
+  const _GuideStep({required this.step, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6.0),
+      child: Row(
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: AppColors.primarySpark.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            alignment: Alignment.center,
+            child: Text(step,
+                style: const TextStyle(
+                    color: AppColors.primarySpark,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(text,
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 14)),
           ),
         ],
       ),
