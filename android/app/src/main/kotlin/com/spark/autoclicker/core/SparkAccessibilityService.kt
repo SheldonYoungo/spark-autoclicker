@@ -100,8 +100,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     )
 
     private val TYPE_SYNONYMS = mapOf(
-        "compra" to listOf("compra", "shopping", "groceries", "express", "envio", "entrega", "grocery"),
-        "recolección" to listOf("recolección", "pickup", "curbside", "delivery", "retiro", "recogida"),
+        "compra" to listOf("compra", "shopping", "groceries", "express", "delivery", "envio", "entrega", "grocery"),
+        "recolección" to listOf("recolección", "pickup", "curbside", "retiro", "recogida"),
         "multiviaje" to listOf("multiviaje", "batch", "multiple", "stops", "viaje", "multi"),
     )
 
@@ -252,6 +252,11 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
         val packageName = event.packageName?.toString() ?: return
 
+        if (packageName == "com.spark.autoclicker.sandbox") {
+            testMode = true
+            Log.d(TAG, "🧪 Sandbox detectado — testMode activado")
+        }
+
         if (!(packageName.contains("walmart", ignoreCase = true) ||
               packageName.contains("spark", ignoreCase = true) ||
               packageName == "com.spark.autoclicker")) {
@@ -293,7 +298,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             for (root in roots) {
             val pkg = root.packageName?.toString() ?: ""
             val isOurPkg = pkg == "com.spark.autoclicker"
-            if (!(pkg.contains("walmart", ignoreCase = true) || (testMode && isOurPkg))) continue
+            if (!(pkg.contains("walmart", ignoreCase = true) || (testMode && isOurPkg) || (testMode && pkg == "com.spark.autoclicker.sandbox"))) continue
             sendDiagnosticData("scanning_pkg", pkg)
 
             if (testMode && isOurPkg) {
@@ -325,47 +330,6 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
                 // No break — let flow continue to chevron tap (Phase 4)
             }
 
-            // Phase 2: Click ACEPTAR via flat scan (fallback si card isolation no encontró)
-            if (!matchedRootIsCard) {
-                val results = mutableListOf<ScanResult>()
-                val allText = StringBuilder()
-                collectNodes(root, 0, 40, results, allText)
-                if (results.isNotEmpty()) {
-                    val text = allText.toString()
-                    val textPreview = text.take(500).replace('\n', ' ')
-                    Log.d(TAG, "📋 Flat scan text: \"$textPreview\"...")
-                    sendDiagnosticData("flat_scan_text", textPreview)
-                    val blocked = containsBlockedOfferText(text)
-                    val stopsOk = matchesInternalStops(text)
-                    Log.d(TAG, "📋 Flat scan checks: blocked=$blocked stopsOk=$stopsOk")
-                    val hasValidPrice = results.any { it.price >= minPrice && it.price > 0 }
-                    val hasValidDistance = results.any { it.distance <= maxDistance }
-                    val store = results.firstOrNull { it.store != null }?.store ?: windowContextStore
-                    val typeOk = typeMatches(text)
-                    sendDiagnosticDataMap(mapOf(
-                        "flat_has_price" to hasValidPrice.toString(),
-                        "flat_has_distance" to hasValidDistance.toString(),
-                        "flat_store_matches" to storeMatches(store).toString(),
-                        "flat_type_matches" to typeOk.toString(),
-                        "flat_blocked" to blocked.toString(),
-                        "flat_stops_ok" to stopsOk.toString(),
-                    ))
-                    if (hasValidPrice && hasValidDistance && storeMatches(store) && typeOk) {
-                        if (!blocked && stopsOk) {
-                            Log.d(TAG, "📋 Flat scan: detected (chevron only, no accept)")
-                            sendDiagnosticData("scan_result", "flat_detected_chevron_only")
-                        } else {
-                            Log.d(TAG, "📋 Flat scan: oferta rechazada por filtros")
-                            sendDiagnosticData("scan_result", "filtered_out_blocked_or_stops")
-                        }
-                    } else {
-                        sendDiagnosticData("scan_result", "no_filter_match")
-                    }
-                } else {
-                    sendDiagnosticData("flat_scan_text", "(empty)")
-                }
-            }
-
             // Phase 3: Countdown handler — pre-click offers with timer
             if (rootContainsDisponibleEn(root)) {
                 val now = System.currentTimeMillis()
@@ -384,7 +348,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             }
 
             // Phase 4: Chevron tap — tap top-right corner of matching cards
-            if (!matchedRootIsCard) {
+            if (!matchedRootIsCard && !offerFound) {
                 val canChevron = System.currentTimeMillis() - lastChevronTapMs >= chevronCooldownMs
                 if (canChevron && findAndTapOfferChevron(root)) {
                     lastChevronTapMs = System.currentTimeMillis()
@@ -403,7 +367,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             "scrolled_for_accept" to if (scrolledForAccept) "true" else "false",
         ))
 
-        // Click ACEPTAR if found via card isolation (flat scan cannot scope accept button)
+        // Click ACEPTAR if found via card isolation or flat scan
         if (offerFound && matchedRoot != null && !countdownAction) {
             logToFlutter("🎯 Oferta válida encontrada. Buscando botón Accept...")
             var clicked = false
@@ -474,11 +438,13 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             }
         }
 
-        // Scroll down if no action was taken or off-screen ACEPTAR needs revealing
+        // Scroll down when no action taken or off-screen button needs revealing
+        // Never scroll on our own overlay (com.spark.autoclicker)
         if ((!actionTaken || scrolledForAccept) && canScrollNow()) {
             for (root in roots) {
                 val pkg = root.packageName?.toString() ?: ""
-                if (!(pkg.contains("walmart", ignoreCase = true) || (testMode && pkg == "com.spark.autoclicker"))) continue
+                if (pkg == "com.spark.autoclicker") continue
+                if (!(pkg.contains("walmart", ignoreCase = true) || (testMode && pkg == "com.spark.autoclicker.sandbox"))) continue
                 val scrolled = scrollDown(root)
                 if (scrolled) {
                     Log.d(TAG, "📜 Scroll down ejecutado")
@@ -489,7 +455,9 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
         } finally {
             safeRecycleAll(roots)
-            if (matchedRootIsCard) safeRecycle(matchedRoot)
+            if (offerFound && matchedRoot != null) {
+                safeRecycle(matchedRoot)
+            }
         }
     }
 
@@ -534,27 +502,64 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         val screenWidth = try {
             resources.displayMetrics.widthPixels
         } catch (e: Exception) { 1080 }
-        findCardContainers(root, cards, screenWidth, 0, 25)
+
+        // Bottom-up: find ACEPTAR buttons, then walk up to card-sized parent
+        val acceptNodes = mutableListOf<AccessibilityNodeInfo>()
+        findAcceptButtons(root, acceptNodes)
+
+        for (acceptNode in acceptNodes) {
+            val card = walkUpToCard(acceptNode, screenWidth)
+            if (card != null) {
+                cards.add(card)
+            }
+            acceptNode.recycle()
+        }
+
         return cards
     }
 
-    private fun findCardContainers(
+    private fun findAcceptButtons(
         node: AccessibilityNodeInfo?,
-        cards: MutableList<AccessibilityNodeInfo>,
-        screenWidth: Int,
-        depth: Int,
-        maxDepth: Int
+        results: MutableList<AccessibilityNodeInfo>
     ) {
-        if (node == null || depth > maxDepth) return
-        if (isCardSized(node, screenWidth) && hasDollarSign(node)) {
-            cards.add(AccessibilityNodeInfo.obtain(node))
+        if (node == null) return
+        val text = node.text?.toString() ?: ""
+        val cd = node.contentDescription?.toString() ?: ""
+        val lowerText = text.lowercase()
+        val lowerCd = cd.lowercase()
+        val hasAcceptText = "aceptar" in lowerText || "accept" in lowerText ||
+            "aceptar" in lowerCd || "accept" in lowerCd
+        val isButtonClass = node.className?.toString()
+            ?.contains("button", ignoreCase = true) == true
+        if (hasAcceptText && isButtonClass) {
+            results.add(AccessibilityNodeInfo.obtain(node))
             return
         }
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            findCardContainers(child, cards, screenWidth, depth + 1, maxDepth)
+            findAcceptButtons(child, results)
             child.recycle()
         }
+    }
+
+    private fun walkUpToCard(
+        leaf: AccessibilityNodeInfo,
+        screenWidth: Int
+    ): AccessibilityNodeInfo? {
+        var current = leaf
+        var step = 0
+        while (step < 100) {
+            val parent = current.parent ?: break
+            if (parent === current) break
+            if (isCardSized(parent, screenWidth) && hasDollarSign(parent)) {
+                return AccessibilityNodeInfo.obtain(parent)
+            }
+            if (current !== leaf) current.recycle()
+            current = parent
+            step++
+        }
+        if (current !== leaf) current.recycle()
+        return null
     }
 
     private fun isCardSized(node: AccessibilityNodeInfo, screenWidth: Int): Boolean {
@@ -563,15 +568,8 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
         val width = rect.width()
         val height = rect.height()
         val minWidth = (screenWidth * 0.20).toInt()
-        if (width < minWidth) return false
-
-        val className = node.className?.toString() ?: ""
-        val isCardView = className.contains("CardView", ignoreCase = true)
-
-        if (isCardView) {
-            return width <= screenWidth && height in 80..2000
-        }
-        return width <= (screenWidth * 0.92).toInt() && height in 80..700
+        val maxWidth = (screenWidth * 0.98).toInt()
+        return width in minWidth..maxWidth && height in 80..2000
     }
 
     private fun hasDollarSign(node: AccessibilityNodeInfo): Boolean {
@@ -645,9 +643,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
 
     private fun storeMatches(store: String?): Boolean {
         if (storeId.isEmpty()) return true
-        val accepted = storeId.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        if (accepted.isEmpty()) return true
-        return store != null && accepted.contains(store)
+        return store != null && store == storeId.trim()
     }
 
     private fun typeMatches(text: String): Boolean {
