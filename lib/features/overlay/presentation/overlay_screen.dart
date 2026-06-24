@@ -232,8 +232,9 @@ class _OverlayScreenState extends State<OverlayScreen> {
             ValueListenableBuilder<BotFilters>(
               valueListenable: _filterService.filtersNotifier,
               builder: (context, filters, _) {
+                // FUTURE MULTI-TIENDA: Restaurar split(',') logic
                 final String storeDisplay = filters.storeCode?.isNotEmpty == true
-                    ? (filters.storeCode!.contains(',') ? '${filters.storeCode!.split(',').length} tnd' : '#${filters.storeCode}')
+                    ? '#${filters.storeCode}'
                     : 'FALTA';
 
                 String typesDisplay = 'TODAS';

@@ -176,6 +176,8 @@ class _BotMainScreenState extends State<BotMainScreen>
   }
 
   void _showStoreModal(String? currentVal) {
+    // Single-store mode: la lista siempre tendrá max 1 elemento
+    // FUTURE: Para multi-tienda, restaurar chips comentados y cambiar max a 3
     final List<String> validStores = (currentVal ?? '')
         .split(',')
         .map((e) => e.trim())
@@ -194,8 +196,8 @@ class _BotMainScreenState extends State<BotMainScreen>
       builder: (context) => _KeyboardPadding(
         child: StatefulBuilder(builder: (context, setModalState) {
           return _StyledModalContainer(
-            title: 'Códigos de Tienda',
-            subtitle: 'Ingresa 4 dígitos y presiona + para agregar',
+            title: 'Código de Tienda',
+            subtitle: 'Ingresa el código de 4 dígitos',
             hasErrorNotifier: errorNotifier,
             onSave: () async {
               final val = inputController.text.trim();
@@ -212,13 +214,10 @@ class _BotMainScreenState extends State<BotMainScreen>
                   }
                   return;
                 }
-                if (validStores.length < 3) {
-                  if (validStores.contains(val)) {
-                    inputController.clear();
-                  } else {
-                    validStores.add(val);
-                  }
-                }
+                // Single-store: reemplazar en vez de acumular
+                validStores.clear();
+                validStores.add(val);
+                inputController.clear();
               }
 
               Navigator.pop(context);
@@ -226,34 +225,35 @@ class _BotMainScreenState extends State<BotMainScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (validStores.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16.0),
-                    child: Wrap(
-                      spacing: 8.0,
-                      runSpacing: 8.0,
-                      children: validStores.map((store) {
-                        return Chip(
-                          label: Text('#$store',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold)),
-                          backgroundColor:
-                              AppColors.primarySpark.withValues(alpha: 0.2),
-                          deleteIconColor: Colors.redAccent,
-                          side: BorderSide(
-                              color: AppColors.primarySpark
-                                  .withValues(alpha: 0.5)),
-                          onDeleted: () {
-                            setModalState(() {
-                              validStores.remove(store);
-                              localError = null;
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                  ),
+                // FUTURE MULTI-TIENDA: Restaurar chips aquí
+                // if (validStores.isNotEmpty)
+                //   Padding(
+                //     padding: const EdgeInsets.only(bottom: 16.0),
+                //     child: Wrap(
+                //       spacing: 8.0,
+                //       runSpacing: 8.0,
+                //       children: validStores.map((store) {
+                //         return Chip(
+                //           label: Text('#$store',
+                //               style: const TextStyle(
+                //                   color: Colors.white,
+                //                   fontWeight: FontWeight.bold)),
+                //           backgroundColor:
+                //               AppColors.primarySpark.withValues(alpha: 0.2),
+                //           deleteIconColor: Colors.redAccent,
+                //           side: BorderSide(
+                //               color: AppColors.primarySpark
+                //                   .withValues(alpha: 0.5)),
+                //           onDeleted: () {
+                //             setModalState(() {
+                //               validStores.remove(store);
+                //               localError = null;
+                //             });
+                //           },
+                //         );
+                //       }).toList(),
+                //     ),
+                //   ),
                 if (localError != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 12.0),
@@ -264,58 +264,38 @@ class _BotMainScreenState extends State<BotMainScreen>
                     Expanded(
                       child: TextField(
                         controller: inputController,
-                        enabled: validStores.length < 3,
                         autofocus: false,
                         keyboardType: TextInputType.number,
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly,
                           LengthLimitingTextInputFormatter(4),
                         ],
-                        style: TextStyle(
-                            color: validStores.length < 3
-                                ? Colors.white
-                                : Colors.white54,
+                        style: const TextStyle(
+                            color: Colors.white,
                             fontSize: 24,
                             fontWeight: FontWeight.bold),
                         textAlign: TextAlign.center,
                         decoration: InputDecoration(
                           prefixText: '#',
-                          prefixStyle: TextStyle(
-                              color: validStores.length < 3
-                                  ? AppColors.primarySpark
-                                  : Colors.grey,
+                          prefixStyle: const TextStyle(
+                              color: AppColors.primarySpark,
                               fontSize: 24),
                           filled: true,
                           fillColor: Colors.white.withValues(alpha: 0.05),
                           border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(16),
                               borderSide: BorderSide.none),
-                          hintText: validStores.length < 3
-                              ? '0000'
-                              : 'Límite',
+                          hintText: '0000',
                           hintStyle: const TextStyle(color: Colors.white24),
                         ),
                         onSubmitted: (val) {
                           if (val.length == 4) {
-                            if (validStores.contains(val)) {
-                              setModalState(() {
-                                localError = '⚠️ La tienda #$val ya está en la lista';
-                              });
+                            setModalState(() {
+                              localError = null;
+                              validStores.clear();
+                              validStores.add(val);
                               inputController.clear();
-                              Future.delayed(const Duration(seconds: 2), () {
-                                if (context.mounted) {
-                                  setModalState(() { localError = null; });
-                                }
-                              });
-                              return;
-                            }
-                            if (validStores.length < 3) {
-                              setModalState(() {
-                                localError = null;
-                                validStores.add(val);
-                                inputController.clear();
-                              });
-                            }
+                            });
                           }
                         },
                       ),
@@ -323,50 +303,33 @@ class _BotMainScreenState extends State<BotMainScreen>
                     const SizedBox(width: 8),
                     Container(
                       decoration: BoxDecoration(
-                        color: validStores.length < 3
-                            ? AppColors.primarySpark.withValues(alpha: 0.1)
-                            : Colors.transparent,
+                        color: AppColors.primarySpark.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: IconButton(
-                        icon: Icon(Icons.add,
-                            color: validStores.length < 3
-                                ? AppColors.primarySpark
-                                : Colors.grey,
+                        icon: const Icon(Icons.add,
+                            color: AppColors.primarySpark,
                             size: 28),
-                        onPressed: validStores.length >= 3
-                            ? null
-                            : () {
-                                final val = inputController.text.trim();
-                                if (val.length == 4) {
-                                  if (validStores.contains(val)) {
-                                    setModalState(() {
-                                      localError = '⚠️ La tienda #$val ya está en la lista';
-                                    });
-                                    inputController.clear();
-                                    Future.delayed(const Duration(seconds: 2), () {
-                                      if (context.mounted) {
-                                        setModalState(() { localError = null; });
-                                      }
-                                    });
-                                    return;
-                                  }
-                                  setModalState(() {
-                                    localError = null;
-                                    validStores.add(val);
-                                    inputController.clear();
-                                  });
-                                } else if (val.length > 0 && val.length < 4) {
-                                  setModalState(() {
-                                    localError = '⚠️ El código debe tener 4 dígitos';
-                                  });
-                                  Future.delayed(const Duration(seconds: 2), () {
-                                    if (context.mounted) {
-                                      setModalState(() { localError = null; });
-                                    }
-                                  });
-                                }
-                              },
+                        onPressed: () {
+                          final val = inputController.text.trim();
+                          if (val.length == 4) {
+                            setModalState(() {
+                              localError = null;
+                              validStores.clear();
+                              validStores.add(val);
+                              inputController.clear();
+                            });
+                          } else if (val.length > 0 && val.length < 4) {
+                            setModalState(() {
+                              localError = '⚠️ El código debe tener 4 dígitos';
+                            });
+                            Future.delayed(const Duration(seconds: 2), () {
+                              if (context.mounted) {
+                                setModalState(() { localError = null; });
+                              }
+                            });
+                          }
+                        },
                       ),
                     )
                   ],
@@ -377,7 +340,7 @@ class _BotMainScreenState extends State<BotMainScreen>
         }),
       ),
     ).whenComplete(() {
-      final finalString = validStores.join(',');
+      final finalString = validStores.isNotEmpty ? validStores.first : '';
       _filterService.saveFilters(_filterService.filtersNotifier.value.copyWith(storeCode: finalString));
     });
   }
@@ -868,12 +831,11 @@ class _BotMainScreenState extends State<BotMainScreen>
                       childAspectRatio: 0.85,
                       children: [
                         FilterCard(
+                          // FUTURE MULTI-TIENDA: Restaurar split(',') logic
                           title: 'Tienda Walmart',
                           value: filters.storeCode != null &&
                                   filters.storeCode!.isNotEmpty
-                              ? (filters.storeCode!.contains(',')
-                                  ? '${filters.storeCode!.split(',').length} tiendas'
-                                  : '#${filters.storeCode}')
+                              ? '#${filters.storeCode}'
                               : 'FALTA',
                           icon: Icons.storefront_outlined,
                           accentColor: (filters.storeCode == null ||
