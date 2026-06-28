@@ -334,7 +334,7 @@ class _BotMainScreenState extends State<BotMainScreen>
                           hintStyle: const TextStyle(color: Colors.white24),
                         ),
                         onSubmitted: (val) {
-                          if (val.length >= 1 && val.length <= 5) {
+                          if (val.isNotEmpty && val.length <= 5) {
                             setModalState(() {
                               localError = null;
                               validStores.clear();
@@ -606,6 +606,11 @@ class _BotMainScreenState extends State<BotMainScreen>
   void _showOrderTypeModal(List<String> currentTypes) {
     List<String> tempTypes = List.from(currentTypes);
     final options = ['compras', 'recolección', 'multiviajes'];
+    final typeLabels = {
+      'compras': 'COMPRAS',
+      'recolección': 'RECOLECCIÓN-RETIRO',
+      'multiviajes': 'MULTIVIAJES',
+    };
 
     showModalBottomSheet(
       context: context,
@@ -630,7 +635,7 @@ class _BotMainScreenState extends State<BotMainScreen>
                 children: options.map((opt) {
                   final isSelected = tempTypes.any((t) => t.toLowerCase() == opt);
                   return FilterChip(
-                    label: Text(opt.toUpperCase()),
+                    label: Text(typeLabels[opt] ?? opt.toUpperCase()),
                     selected: isSelected,
                     onSelected: (val) {
                       setModalState(() {
@@ -674,32 +679,6 @@ class _BotMainScreenState extends State<BotMainScreen>
     });
   }
 
-  void _showStyledModal(
-      {required String title,
-      required String subtitle,
-      required Widget child,
-      required VoidCallback onSave}) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.background,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(32))),
-      builder: (context) => Padding(
-        padding:
-            EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: _StyledModalContainer(
-          title: title,
-          subtitle: subtitle,
-          onSave: () {
-            onSave();
-            Navigator.pop(context);
-          },
-          child: child,
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1146,7 +1125,7 @@ class _BotMainScreenState extends State<BotMainScreen>
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      'Tipo de orden: ${filters.orderTypes.join(" · ")}',
+                      'Tipo de orden: ${filters.orderTypesDisplay}',
                       style: GoogleFonts.inter(
                           fontSize: 12,
                           color:
@@ -1270,11 +1249,13 @@ class _BotMainScreenState extends State<BotMainScreen>
 
   Widget _buildSpeedBoostCard(BotFilters filters) {
     String label = 'Normal';
-    if (filters.speedMultiplier >= 3.0)
+    if (filters.speedMultiplier >= 3.0) {
       label = 'Extremo';
-    else if (filters.speedMultiplier >= 2.0)
+    } else if (filters.speedMultiplier >= 2.0) {
       label = 'Liebre';
-    else if (filters.speedMultiplier >= 1.5) label = 'Seguro';
+    } else if (filters.speedMultiplier >= 1.5) {
+      label = 'Seguro';
+    }
 
     return GestureDetector(
       onTap: () => _showSpeedModal(filters.speedMultiplier),

@@ -161,7 +161,7 @@ class FilterService {
         now = DateTime.now();
       }
       
-      return now.isBefore(DateTime.fromMillisecondsSinceEpoch(expirationTs!));
+      return now.isBefore(DateTime.fromMillisecondsSinceEpoch(expirationTs));
     } catch (e) { return false; }
   }
 
@@ -228,7 +228,7 @@ class FilterService {
     isBotActiveNotifier.value = active;
 
     if (!isMainIsolate) {
-      final mainPort = IsolateNameServer.lookupPortByName(_portName + '_main');
+      final mainPort = IsolateNameServer.lookupPortByName('${_portName}_main');
       if (mainPort != null) {
         debugPrint("FilterService: Delegando toggleBot al Main Isolate...");
         mainPort.send({'type': 'toggle_request', 'active': active});

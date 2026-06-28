@@ -74,5 +74,14 @@ class BotFilters {
     );
   }
 
+  static const Map<String, String> typeDisplayLabels = {
+    'compras': 'Compras',
+    'recolección': 'Recolección-Retiro',
+    'multiviajes': 'Multiviajes',
+  };
+
+  String get orderTypesDisplay =>
+      orderTypes.map((t) => BotFilters.typeDisplayLabels[t] ?? t).join(' · ');
+
   static const _sentinel = Object();
 }

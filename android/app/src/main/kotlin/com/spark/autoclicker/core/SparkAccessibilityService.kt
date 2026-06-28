@@ -120,6 +120,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
     private val TYPE_SYNONYMS = mapOf(
         "compra" to listOf("compra", "shopping", "groceries", "express", "delivery", "envio", "entrega", "grocery"),
         "recolección" to listOf("recolección", "pickup", "curbside", "retiro", "recogida"),
+        "retiro" to listOf("recolección", "pickup", "curbside", "retiro", "recogida"),
         "multiviaje" to listOf("multiviaje", "batch", "multiple", "stops", "viaje", "multi"),
     )
 
@@ -726,7 +727,7 @@ class SparkAccessibilityService : AccessibilityService(), SharedPreferences.OnSh
             val nkw = foldDiacritics(kw).lowercase()
             if (folded.contains(nkw)) return true
 
-            val synonyms = TYPE_SYNONYMS.entries.firstOrNull { nkw.contains(it.key) }?.value
+            val synonyms = TYPE_SYNONYMS.entries.firstOrNull { nkw.contains(foldDiacritics(it.key).lowercase()) }?.value
             if (synonyms != null && synonyms.any { folded.contains(it) }) return true
 
             false

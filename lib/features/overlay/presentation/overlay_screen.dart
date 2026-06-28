@@ -242,7 +242,9 @@ class _OverlayScreenState extends State<OverlayScreen> {
                   if (filters.orderTypes.length > 2) {
                     typesDisplay = '${filters.orderTypes.length} CATEGORÍAS';
                   } else {
-                    typesDisplay = filters.orderTypes.join(', ').toUpperCase();
+                    typesDisplay = filters.orderTypes
+                        .map((t) => (BotFilters.typeDisplayLabels[t] ?? t).toUpperCase())
+                        .join(', ');
                   }
                 }
 

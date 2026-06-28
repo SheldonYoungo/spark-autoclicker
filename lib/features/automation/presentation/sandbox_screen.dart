@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:spark_autoclicker/core/theme/app_theme.dart';
 import 'package:spark_autoclicker/core/utils/accessibility_util.dart';
